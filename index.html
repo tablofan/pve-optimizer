@@ -137,6 +137,7 @@
     function typeLabel(b) { return (b || []).map(function (x) { return '<span class="' + resClass(x.res) + '">+' + Number(x.pct) + '% ' + esc(x.res) + '</span>'; }).join(', '); }
     function cav(tribe) { return (UNITS[tribe] || []).filter(function (u) { return u.type === 'c'; }); }
     var GAME_TRIBE = { 1: 'romans', 2: 'teutons', 3: 'gauls', 6: 'egyptians', 7: 'huns', 8: 'spartans', 9: 'vikings' };
+    var RACE_SLUG = ['romans', 'teutons', 'gauls', 'nature', 'natars', 'egyptians', 'huns', 'spartans', 'vikings']; // global unit id uN -> race = floor((N-1)/10)
 
     // ── solver ──
     function getSolver() { return (typeof solver !== 'undefined') ? solver : (window.solver || null); }
@@ -179,12 +180,16 @@
     // Troop icons carry `tN` in their class (e.g. `unit_small tribe6 t4` -> slot t4), paired with a
     // `.value` count. We look for per-village blocks (an ancestor carrying data-did) on the troops
     // overview. Best-effort across patches; the editable village table is the guaranteed fallback.
+    // slot from a unit icon class: `tN` token (e.g. tribe6 t4 -> 4), else global `uN` (((N-1)%10)+1)
+    function slotFromClass(cls) {
+      var m = cls.match(/\bt(\d{1,2})\b/); if (m) { var s = +m[1]; return (s >= 1 && s <= 10) ? s : null; }
+      var u = cls.match(/\bu(\d{1,2})\b/); if (u) return (((+u[1]) - 1) % 10) + 1;
+      return null;
+    }
     function troopsFromEl(rootEl) {
       var t = {};
-      rootEl.querySelectorAll('i[class*="unit"], [class*="unit_"]').forEach(function (ic) {
-        var cls = ic.getAttribute('class') || ''; // not .className (SVG gives an object)
-        var m = cls.match(/\bt(\d{1,2})\b/); if (!m) return;
-        var slot = parseInt(m[1], 10); if (slot < 1 || slot > 10) return;
+      rootEl.querySelectorAll('i[class*="unit"], img[class*="unit"], [class*="unit_"]').forEach(function (ic) {
+        var slot = slotFromClass(ic.getAttribute('class') || ''); if (!slot) return;
         var wrap = ic.closest('td,span,div,li') || ic.parentElement;
         var valEl = wrap && (wrap.querySelector('.value') || wrap.nextElementSibling);
         var n = numC(valEl ? valEl.textContent : (wrap && wrap.textContent));
@@ -192,20 +197,45 @@
       });
       return t;
     }
+    // Troops overview <table id="troops">: thead unit icons define the column->slot order; each
+    // tbody row is a village (td.villageName a[href*=newdid] -> did) with count cells in that order.
     function parseTroops(doc) {
       var byDid = {}, byName = {};
+      var table = doc.querySelector('#troops');
+      if (table) {
+        var cols = [];
+        table.querySelectorAll('thead td.unit img, thead td.unit i, thead img.unit, thead i.unit').forEach(function (ic) {
+          cols.push(slotFromClass(ic.getAttribute('class') || ''));
+        });
+        table.querySelectorAll('tbody tr').forEach(function (tr) {
+          var link = tr.querySelector('.villageName a');
+          var did = link ? ((link.getAttribute('href') || '').match(/newdid=(\d+)/) || [])[1] : null;
+          var name = clean((tr.querySelector('.villageName') || {}).textContent);
+          var cells = tr.querySelectorAll('td:not(.villageName)');
+          var t = {};
+          for (var i = 0; i < cols.length && i < cells.length; i++) {
+            if (cols[i] == null) continue;
+            var n = numC(cells[i].textContent);
+            if (!isNaN(n) && n > 0) t['t' + cols[i]] = n;
+          }
+          if (Object.keys(t).length) { if (did) byDid[did] = Object.assign(byDid[did] || {}, t); if (name) byName[name] = Object.assign(byName[name] || {}, t); }
+        });
+        if (table.querySelector('tbody tr')) return { byDid: byDid, byName: byName };
+      }
+      // fallback for other layouts: scan per-village (data-did) blocks for unit icons
       doc.querySelectorAll('[data-did]').forEach(function (eel) {
-        var did = eel.getAttribute('data-did');
-        var t = troopsFromEl(eel);
-        if (Object.keys(t).length) byDid[did] = Object.assign(byDid[did] || {}, t);
+        var t = troopsFromEl(eel); if (Object.keys(t).length) byDid[eel.getAttribute('data-did')] = Object.assign(byDid[eel.getAttribute('data-did')] || {}, t);
       });
       return { byDid: byDid, byName: byName };
     }
     function detectTribe(doc) {
       var hay = (doc.body ? (doc.body.getAttribute('class') || '') : '') + ' ' + (doc.documentElement ? (doc.documentElement.getAttribute('class') || '') : '');
-      var m = hay.match(/tribe(\d+)/);
+      var m = hay.match(/\btribe(\d+)/) || hay.match(/\bvillage(\d)\b/); // body is "villageN" = game tribe id
       if (!m) { var te = doc.querySelector('[class*="tribe"]'); if (te) m = (te.getAttribute('class') || '').match(/tribe(\d+)/); }
-      return (m && GAME_TRIBE[m[1]]) || null;
+      if (m && GAME_TRIBE[m[1]]) return GAME_TRIBE[m[1]];
+      var img = doc.querySelector('#troops img.unit, img.unit[class*="u"], [class*="unit"][class*="u"]'); // infer from a global unit id
+      if (img) { var mu = (img.getAttribute('class') || '').match(/\bu(\d{1,2})\b/); if (mu) return RACE_SLUG[Math.floor((+mu[1] - 1) / 10)] || null; }
+      return null;
     }
 
     // ── merges ──
