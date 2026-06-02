@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PvE Optimizer — Collector
 // @namespace    https://github.com/ren/pve-optimizer
-// @version      0.2.1
+// @version      0.3.0
 // @description  Scrape free oases (coords+type), own villages/cavalry, and current farm lists from a Travian T4.6 gameworld, and hand the data to the PvE Optimizer calculator.
 // @match        *://*.travian.com/*
 // @run-at       document-idle
@@ -31,11 +31,13 @@
 
   // ── tiny helpers ──
   var U_MINUS = /−/g;                          // Travian renders negatives as U+2212
-  // capture a single signed integer (tolerating thousands separators), not a digit-soup concat
+  var U_MARKS = /[‪-‮⁦-⁩‎‏⁠]/g; // bidi marks Travian wraps numbers in
+  // capture a single signed integer (after stripping bidi marks + normalising the minus)
   function num(s) {
-    var m = String(s).replace(U_MINUS, '-').match(/-?\d[\d.,]*\d|-?\d/);
+    var m = String(s).replace(U_MARKS, '').replace(U_MINUS, '-').match(/-?\d[\d.,]*\d|-?\d/);
     return m ? parseInt(m[0].replace(/[.,]/g, ''), 10) : NaN;
   }
+  function clean(s) { return String(s || '').replace(U_MARKS, '').replace(/\s+/g, ' ').trim(); }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function jitter() { return CFG.throttleMin + Math.floor(Math.random() * (CFG.throttleMax - CFG.throttleMin)); }
   function parseDoc(html) { return new DOMParser().parseFromString(html, 'text/html'); }
@@ -107,31 +109,26 @@
     log('Done: ' + oases.length + ' free oases' + (noBonus ? ' (' + noBonus + ' with unreadable bonus — check {a.rN} parse)' : '') + '.');
   }
 
-  // ── 2. own villages + coords ────────────────────────────────────────
-  // #sidebarBoxVillageList .listEntry -> data-did + coordinates.  (VALIDATE LIVE)
+  // ── 2. own villages + coords (read from the live sidebar DOM) ───────
+  // #sidebarBoxVillageList .listEntry.village[data-did]; name in .name;
+  // coords in .coordinatesGrid > .coordinateX / .coordinateY (bidi-wrapped).
   function readVillages(log) {
-    var entries = document.querySelectorAll('#sidebarBoxVillageList .listEntry, #sidebarBoxVillageList li');
+    var rows = document.querySelectorAll('#sidebarBoxVillageList .listEntry.village');
     var vs = [];
-    entries.forEach(function (li) {
-      var link = li.querySelector('a[data-did], a[href*="newdid="], a[href*="dorf1"]');
-      if (!link) return;
-      // FIX: index the regex match, not the whole || chain
-      var did = link.getAttribute('data-did') ||
-        ((link.getAttribute('href') || '').match(/newdid=(\d+)/) || [])[1];
-      if (!did) return;
-      // name from the link/.name node, with any coordinate substring stripped out
-      var nameEl = li.querySelector('.name') || link;
-      var name = (nameEl.textContent || '').replace(/\s+/g, ' ')
-        .replace(/\(?\s*-?\d{1,3}\s*[|/]\s*-?\d{1,3}\s*\)?/, '').trim();
-      var coordEl = li.querySelector('.coordinatesGrid, .coordinates, [class*="coord"]');
-      var ct = (coordEl ? coordEl.textContent : li.textContent).replace(U_MINUS, '-');
-      var m = ct.match(/(-?\d{1,3})\s*[|/]\s*(-?\d{1,3})/);
-      if (!m) return;
-      vs.push({ did: Number(did), name: name || ('v' + did), x: num(m[1]), y: num(m[2]), troops: {} });
+    rows.forEach(function (el) {
+      var did = el.getAttribute('data-did'); if (!did) return;
+      var nameEl = el.querySelector('.name');
+      var name = nameEl ? clean(nameEl.textContent) : ('v' + did);
+      var cg = el.querySelector('.coordinatesGrid');
+      var x = num((cg && cg.querySelector('.coordinateX') || {}).textContent);
+      var y = num((cg && cg.querySelector('.coordinateY') || {}).textContent);
+      if (isNaN(x) || isNaN(y)) return;
+      vs.push({ did: Number(did), name: name || ('v' + did), x: x, y: y, troops: {} });
     });
     DATA.villages = vs;
-    log('Villages: ' + vs.length + (vs.length ? ' (' + vs.map(function (v) { return v.name; }).join(', ') + ')'
-      : ' — none; check the #sidebarBoxVillageList selector'));
+    log('Villages: ' + vs.length + (vs.length
+      ? ' (' + vs.slice(0, 5).map(function (v) { return v.name; }).join(', ') + (vs.length > 5 ? ', …' : '') + ')'
+      : ' — none in #sidebarBoxVillageList .listEntry.village'));
     return vs;
   }
 
@@ -146,53 +143,56 @@
     }
     log('Troops read for ' + DATA.villages.length + ' villages.');
   }
-  // Travian unit icons carry a GLOBAL class uN where N = race*10 + slot (e.g. Nature animals are
-  // u31..u40, Huns u61..u70). So the rally-point slot is ((N-1) % 10) + 1 — robust across tribes.
-  // We pair each unit icon with the count in its own cell (or the next cell). VALIDATE LIVE: confirm
-  // the troops table renders unit icons with these uN classes.
-  function parseTroopsTable(doc) {
+  // Travian unit icons carry a class like `unit_small tribe6 t4` — the `tN` token IS the
+  // rally-point slot. (Fallback: a global `uN` class, where slot = ((N-1) % 10) + 1.)
+  // Each icon is paired with a `.value` count in its wrapper. Pass a DOM root (element or document).
+  function parseTroopsTable(root) {
     var troops = {}; for (var s = 1; s <= 10; s++) troops['t' + s] = 0; // fixed skeleton
-    var table = doc.querySelector('table.troop_details, #troops table, table.units, .villageInfobox table') || doc;
-    var icons = Array.prototype.filter.call(table.querySelectorAll('i[class*="u"], img[class*="u"], [class*="unit"]'),
-      function (e) { return /\bu(\d{1,2})\b/.test(e.className); });
+    var icons = Array.prototype.filter.call(root.querySelectorAll('i[class*="t"], [class*="unit"] i, [class*="unit"]'),
+      function (e) { return /\bt(\d{1,2})\b/.test(e.className) || /\bu(\d{1,2})\b/.test(e.className); });
     icons.forEach(function (ic) {
-      var m = ic.className.match(/\bu(\d{1,2})\b/); if (!m) return;
-      var slot = ((parseInt(m[1], 10) - 1) % 10) + 1;
-      var cell = ic.closest ? (ic.closest('td,th,div,span') || ic.parentElement) : ic.parentElement;
-      var n = num((cell && cell.textContent) || '');
-      if (isNaN(n) && cell && cell.nextElementSibling) n = num(cell.nextElementSibling.textContent);
-      if (!isNaN(n)) troops['t' + slot] = n;
+      var slot = null;
+      var mt = ic.className.match(/\bt(\d{1,2})\b/);
+      if (mt) slot = parseInt(mt[1], 10);
+      else { var mu = ic.className.match(/\bu(\d{1,2})\b/); if (mu) slot = ((parseInt(mu[1], 10) - 1) % 10) + 1; }
+      if (!slot || slot > 10) return;
+      var wrap = ic.closest ? (ic.closest('td,span,div,li') || ic.parentElement) : ic.parentElement;
+      var valEl = wrap && (wrap.querySelector('.value') || wrap.nextElementSibling);
+      var n = num(valEl ? valEl.textContent : (wrap && wrap.textContent));
+      if (!isNaN(n)) troops['t' + slot] = Math.max(troops['t' + slot], n);
     });
     return troops;
   }
 
-  // ── 4. current farm lists ───────────────────────────────────────────
-  // build.php?id=39&gid=16&tt=99 ; .farmListWrapper -> owning village + target coords.  (VALIDATE LIVE)
-  async function readFarmLists(log) {
-    try {
-      var doc = parseDoc(await getHtml('/build.php?id=39&gid=16&tt=99'));
-      var lists = [], unattributed = 0;
-      doc.querySelectorAll('.farmListWrapper, .farmList').forEach(function (w, idx) {
-        var name = ((w.querySelector('.name, .farmListName .name') || {}).textContent || ('list' + idx)).trim();
-        // real list id + owning village id from data attributes / a village link in the header
-        var listEl = w.querySelector('[data-list]');
-        var listId = listEl ? Number(listEl.getAttribute('data-list')) : (idx + 1);
-        var vlink = w.querySelector('[data-village-id], [data-did], a[href*="newdid="]');
-        var villageDid = vlink && (vlink.getAttribute('data-village-id') || vlink.getAttribute('data-did') ||
-          ((vlink.getAttribute('href') || '').match(/newdid=(\d+)/) || [])[1]);
-        villageDid = villageDid ? Number(villageDid) : null;        // null > wrong guess
-        if (villageDid == null) unattributed++;
-        var targets = [];
-        w.querySelectorAll('a[href*="karte.php?x="]').forEach(function (a) {
-          var m = (a.getAttribute('href') || '').replace(U_MINUS, '-').match(/x=(-?\d+)&y=(-?\d+)/);
-          if (m) targets.push({ x: Number(m[1]), y: Number(m[2]) });
-        });
-        lists.push({ listId: listId, name: name, villageDid: villageDid, targets: targets });
+  // ── 4. current farm lists (read from the live DOM on the Farm List page) ──
+  // The farm-list page is client-rendered, so we read the current DOM (NOT a fetch):
+  //   .farmListWrapper > .farmListHeader [data-list] (list id) + .farmListName .name;
+  //   targets: tbody tr.slot > td.target a[href*="karte.php?x=&y="].
+  // NOTE: collapsed lists don't render their rows — expand a list to capture its targets.
+  function readFarmLists(log) {
+    var wrappers = document.querySelectorAll('.farmListWrapper');
+    if (!wrappers.length) { DATA.farmLists = []; log('Farm lists: 0 — open Rally Point ▸ Farm List first, then click this.'); return []; }
+    var lists = [], collapsed = 0;
+    wrappers.forEach(function (w) {
+      var listEl = w.querySelector('.farmListHeader [data-list]');
+      var listId = listEl ? Number(listEl.getAttribute('data-list')) : null;
+      var name = clean((w.querySelector('.farmListName .name') || {}).textContent) || ('list' + (listId || ''));
+      var slots = w.querySelectorAll('tbody tr.slot');
+      if (!slots.length) collapsed++;
+      var targets = [];
+      slots.forEach(function (tr) {
+        var a = tr.querySelector('td.target a[href*="karte.php?x="]');
+        if (!a) return;
+        var m = (a.getAttribute('href') || '').replace(U_MINUS, '-').match(/x=(-?\d+)&(?:amp;)?y=(-?\d+)/);
+        if (m) targets.push({ x: Number(m[1]), y: Number(m[2]) });
       });
-      DATA.farmLists = lists;
-      log('Farm lists: ' + lists.length + ' (' + lists.reduce(function (s, l) { return s + l.targets.length; }, 0) +
-        ' targets' + (unattributed ? '; ' + unattributed + ' could not be tied to a village' : '') + ').');
-    } catch (e) { log('Farm lists failed: ' + e.message); }
+      lists.push({ listId: listId, name: name, villageDid: null, targets: targets });
+    });
+    DATA.farmLists = lists;
+    var total = lists.reduce(function (s, l) { return s + l.targets.length; }, 0);
+    log('Farm lists: ' + lists.length + ' (' + total + ' targets' +
+      (collapsed ? '; ' + collapsed + ' collapsed — EXPAND them to include their targets' : '') + ').');
+    return lists;
   }
 
   // ── tribe detection ──
