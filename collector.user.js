@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PvE Optimizer — Collector
 // @namespace    https://github.com/ren/pve-optimizer
-// @version      0.2.0
+// @version      0.2.1
 // @description  Scrape free oases (coords+type), own villages/cavalry, and current farm lists from a Travian T4.6 gameworld, and hand the data to the PvE Optimizer calculator.
 // @match        *://*.travian.com/*
 // @run-at       document-idle
@@ -20,7 +20,7 @@
 
   // ── config (persisted on the game origin) ──
   var CFG = Object.assign({
-    radius: 200, zoom: 3, step: 25, throttleMin: 500, throttleMax: 1500, calcUrl: ''
+    radius: 200, zoom: 3, step: 30, throttleMin: 500, throttleMax: 1500, calcUrl: ''  // step 30 = full overlap at zoom-3's 31-wide box, ~196 calls for a full map
   }, JSON.parse(localStorage.getItem('pveCollectorCfg') || '{}'));
   function saveCfg() { localStorage.setItem('pveCollectorCfg', JSON.stringify(CFG)); }
 
