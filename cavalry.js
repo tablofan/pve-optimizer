@@ -1,8 +1,9 @@
 // Cavalry / unit data for Travian T4.6 (x3). Generated from Ash-Warden troops_t46.json,
 // with Huns Marksman speed corrected 15->16 (verified x3 vs Kirilloid t4.fs/units.ts, 2026-06-02).
 // speed = BASE fields/hour at 1x; on a speed server multiply by 2 (NOT by server factor).
-// type: 'i' infantry, 'c' cavalry (only 'c' are farm-send candidates). slot maps to in-game t1..tN.
-// cap = carry capacity per unit.
+// type: 'i' infantry, 'c' cavalry. slot maps to in-game t1..tN.
+// cap = carry capacity per unit. Farm-send candidates are 'c' with cap > 0 — a carry-0
+// cavalry unit is a scout (Spotter/Pathfinder/Equites Legati/…) and can never loot.
 
 const TRIBES = [
   { id: 'romans', name: 'Romans' },

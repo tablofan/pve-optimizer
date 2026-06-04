@@ -71,7 +71,8 @@
     var bySlot = {};
     unitsForTribe.forEach(function (u) { bySlot[u.slot] = u; });
 
-    var selected = cfg.selectedSlots.filter(function (s) { return bySlot[s] && bySlot[s].type === 'c'; });
+    // cavalry with carry 0 (scouts) can never loot — not a farm-send candidate (see CONTEXT.md "Cavalry")
+    var selected = cfg.selectedSlots.filter(function (s) { return bySlot[s] && bySlot[s].type === 'c' && bySlot[s].cap > 0; });
     // slowest selected unit drives speed (global — selection is global)
     var baseSpeed = Infinity;
     selected.forEach(function (s) { baseSpeed = Math.min(baseSpeed, bySlot[s].speed); });

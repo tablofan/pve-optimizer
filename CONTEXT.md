@@ -61,7 +61,9 @@ point from which oases are farmed.
 
 **Cavalry**:
 Mounted units used to farm oases (the "horses"). The only troops this tool plans for; speed is set
-by the **slowest** cavalry type in a send.
+by the **slowest** cavalry type in a send. A mounted unit that **carries nothing** (a scout — e.g.
+Spotter, Pathfinder, Equites Legati) is *not* Cavalry in this tool's sense: it can never be part of
+a **Rainbow**.
 _Avoid_: horses (UI shorthand only), troops (too broad — includes infantry/siege we don't plan).
 
 **Rainbow**:
@@ -108,6 +110,14 @@ every village. _Was_: described as strictly account-wide — corrected, since th
 A village's available **Rainbows** = `min` over the selected cavalry types of their counts. The
 oases assigned to a village are feasible only while their total cost (`Σ ceil(2 × travel/interval)`)
 stays within this budget.
+
+**Current usage**:
+The **Rainbows** a village's **Current farm lists** tie up *today* — the same cost model applied to
+its existing list targets instead of the plan's. Scoped like the **Plan diff**: only targets matching
+a scanned free **Oasis** count (a **Skipped oasis** still being farmed counts — it costs rainbows
+right now); occupied-oasis and village targets don't. Contrast with *plan usage*, the rainbows the
+optimizer's assignment would tie up.
+_Avoid_: before (ambiguous), committed (sounds like an in-game state).
 
 **Outgoing movement**:
 One in-flight farm-send occupying a troop-movement slot. At steady state a farmed **Oasis** holds

@@ -32,9 +32,16 @@ a **Collector** userscript and a static **Calculator** page.
   Kirilloid `t4.fs/units.ts`). Re-derive the full cavalry table from
   `raw.githubusercontent.com/kirilloid/travian/master/src/model/t4.fs/units.ts` (`v` = velocity)
   rather than trusting the json, then sanity-check one route against the in-game rally-point ETA.
-- **Per-village input table** (manual): TS level, sending interval, speed-artefact multiplier.
-- **Controls**: pick ≤3 cavalry types; choose villages; 4-resource filter (oasis buckets by
-  primary/non-crop bonus).
+- **Per-village input table** (manual): TS level, speed-artefact multiplier (interval is global), plus
+  read-only **Now** (Current usage: Σ cost over the village's existing farm-list targets that match a
+  scanned free oasis — duplicates cost twice, lists with an unresolved village aren't counted, `—`
+  until a cavalry type is selected; refreshed on interval/TS/artefact/selection edits and after a run)
+  and **Plan** (used/budget from the last Optimise; `—` before one).
+- **Controls**: pick ≤3 cavalry types — only `type:'c'` with `cap > 0` are candidates (carry-0
+  cavalry = scouts, excluded in `cav()` and again in `buildInstance`); choose villages; 4-resource
+  filter (oasis buckets by primary/non-crop bonus). Plan-diff status toggles (add/move/keep/remove)
+  persist in `config.diffFilters`. No method line in the results — solver/cap diagnostics dropped,
+  per-village usage lives in the village table.
 - Compute the cost matrix → build + solve the ILP (`glpk.js`) → diff vs current farm lists → render
   the **Plan diff** table.
 

@@ -19,10 +19,13 @@ for the build plan / data contract.
    selectors can be fixed by redeploying the page, with no userscript reinstall.) Never writes to the game.
 2. **Calculator** (`index.html`) — a static page that **accumulates** sent data (oases + each sent
    page) and **persists** it in localStorage. It parses villages / farm-lists / troops from sent
-   pages, lets you pick ≤3 cavalry types, set **one global sending interval (seconds)** and **travel
-   cap (max one-way minutes, 0 = none)** + per-village TS / artefact (all persisted), **edit troop
-   counts** (fallback when a troops page isn't sent), filter by resource, and Optimise. Shows a **display-only plan diff grouped by village**
-   (keep / add / move / remove; a move stays under its *current* village tagged `→ destination`), lets
+   pages, lets you pick ≤3 cavalry types (carry-0 cavalry — scouts — are excluded; the picker shows
+   speed only), set **one global sending interval (seconds)** and **travel cap (max one-way minutes,
+   0 = none)** + per-village TS / artefact (all persisted), **edit troop counts** (fallback when a
+   troops page isn't sent), filter by resource, and Optimise. The village table shows per-village
+   **Now** (current usage — rainbows the existing farm lists tie up, free-oasis targets only) and
+   **Plan** (used/budget under the last run) columns. Shows a **display-only plan diff grouped by village**
+   (keep / add / move / remove; the status toggles persist; a move stays under its *current* village tagged `→ destination`), lets
    you **skip** individual oases (a global opt-out — re-Optimise excludes them; persisted), each oasis
    linking to the in-game map. Import accepts a saved page (`.htm`), an **oases-only file** (merged in,
    keeping villages/lists/config/skips), or a full JSON dataset (replaces).

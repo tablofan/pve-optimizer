@@ -58,6 +58,18 @@ t('budget is the scarcest selected type', () => {
   assert.strictEqual(inst.baseSpeed, 14);            // slowest of Steppe16/Marksman16/Marauder14
 });
 
+t('carry-0 cavalry (scouts) are never farm-send candidates', () => {
+  // Huns t3 = Spotter (cavalry, cap 0). Selecting it must not affect speed or budget.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t3: 5, t4: 100 } }],
+    oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }], farmLists: [] };
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t3', 't4'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } } });
+  assert.deepStrictEqual(inst.selectedSlots, ['t4'], 'scout slot filtered out of the selection');
+  assert.strictEqual(inst.villages[0].budget, 100, 'budget = Steppe Rider count, NOT min(5, 100)');
+  assert.strictEqual(inst.baseSpeed, 16, 'speed from the real cavalry');
+});
+
 console.log('solver: greedy optimality + assignment');
 t('greedy places every reachable oasis when budget is ample (=> provably optimal)', () => {
   const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'sample-data.json')));
