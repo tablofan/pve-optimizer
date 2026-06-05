@@ -32,6 +32,6 @@ nothing about; touching them would be destructive.
 - If oasis data is stale (an oasis annexed since the last scan), that target is no longer in the
   free-oasis scan, so it silently falls out of scope (treated like any non-oasis target) rather than
   being flagged for removal. Periodic re-scans keep this current. (Removal reasons are therefore:
-  over capacity, excluded by the resource filter, or duplicate.)
+  over capacity / not optimal, excluded by the resource filter, or duplicate.)
 - A future "apply in-game" mode remains possible but is intentionally out of scope; revisit only with
   explicit per-action confirmation.

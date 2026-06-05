@@ -12,6 +12,11 @@ in the static calculator — no build step). Pure-JS `jsLPSolver` is the fallbac
 asset is undesirable; a greedy cheapest-first heuristic is the runtime fallback if the solver exceeds
 a time budget on a pathological instance.
 
+> **Update (as shipped):** the WASM asset was deemed undesirable, so the calculator loads the pure-JS
+> `javascript-lp-solver` (`javascript-lp-solver@0.4.24`, from CDN) as its only ILP solver — there is
+> no `glpk.js`/WASM. The greedy cheapest-first heuristic remains the runtime fallback, and also runs
+> when the CDN script fails to load (e.g. offline).
+
 Formulation (binary `x[o,v]` per feasible oasis-village pair):
 
 - maximize `Σ x[o,v] − ε·Σ cost[o,v]·x[o,v]` (max oases farmed; tie-break to the cheapest packing)

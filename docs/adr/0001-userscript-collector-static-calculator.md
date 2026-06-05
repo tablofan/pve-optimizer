@@ -4,6 +4,19 @@
 
 accepted
 
+## Update (as built)
+
+The collector/calculator split below still holds, but two details diverged in the shipped code:
+
+- **Parsing moved to the calculator (the "send-page" rework).** The collector does **no** parsing. It
+  ships the scanned free oases (`Send oases`) and each page's raw HTML (`Send this page`) to the
+  calculator via `window.open` + `postMessage` (a ready/retry/ack handshake — not localStorage or a
+  query param); the calculator parses villages / farm-lists / troops from the sent HTML. This lets
+  selectors be fixed by redeploying the page with no userscript reinstall.
+- **The scan is a full-map sweep.** `scanOases` always sweeps a grid of windows across the whole
+  −R..+R map (default R = 200), throttled ~0.5–1.5 s per window. There is no village-centered default
+  and no separate opt-in for a whole-map scan.
+
 ## Decision
 
 The project is two artifacts:

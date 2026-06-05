@@ -3,6 +3,11 @@
 Implementation plan for the design captured in `CONTEXT.md` and `docs/adr/0001-0003`. Two artifacts:
 a **Collector** userscript and a static **Calculator** page.
 
+> **Note (as built):** this plan predates the *send-page* rework. In the shipped code the collector
+> does **no** parsing — it ships the scanned oases and each page's raw HTML to the calculator, which
+> parses villages / farm-lists / troops. Where this plan says "the collector reads/maps …", read it
+> as "the calculator parses …". See `DOCS.md` for the current architecture.
+
 ## Components
 
 ### A. Collector — Tampermonkey userscript (read-only, runs on the gameworld)
@@ -27,7 +32,7 @@ a **Collector** userscript and a static **Calculator** page.
   6 Huns, 7 Spartans, 8 Vikings).
   Note: those 0-based race indices are **internal** to `troops_t46.json`'s layout. The **wire** `tribe`
   field is a lowercase **slug** (`huns`, …); the collector maps the in-game Travian tribeId
-  (1 Romans … 6 Egyptians, 7 Huns, 8 Spartans) to that slug.
+  (1 Romans, 2 Teutons, 3 Gauls, 6 Egyptians, 7 Huns, 8 Spartans, 9 Vikings) to that slug.
   ⚠️ The local json has ≥1 stale value — Huns **Marksman is base 16, not 15** (verified ×3 vs
   Kirilloid `t4.fs/units.ts`). Re-derive the full cavalry table from
   `raw.githubusercontent.com/kirilloid/travian/master/src/model/t4.fs/units.ts` (`v` = velocity)
@@ -42,7 +47,7 @@ a **Collector** userscript and a static **Calculator** page.
   filter (oasis buckets by primary/non-crop bonus). Plan-diff status toggles (add/move/keep/remove)
   persist in `config.diffFilters`. No method line in the results — solver/cap diagnostics dropped,
   per-village usage lives in the village table.
-- Compute the cost matrix → build + solve the ILP (`glpk.js`) → diff vs current farm lists → render
+- Compute the cost matrix → build + solve the ILP (`javascript-lp-solver`) → diff vs current farm lists → render
   the **Plan diff** table.
 
 ## Data contract (Collector → Calculator)
@@ -133,7 +138,7 @@ rather than the full replace that a complete dataset triggers.
 1. Cavalry data module (table + tribe/`tN` mapping) — feeds everything.
 2. Calculator skeleton: JSON import, per-village table, controls (against mock data).
 3. Travel/cost + torus distance; unit-test against known in-game ETAs and the Excel.
-4. ILP integration (`glpk.js`) + greedy fallback + movement estimate.
+4. ILP integration (`javascript-lp-solver`) + greedy fallback + movement estimate.
 5. Plan-diff logic + table UI + map links.
 6. Collector userscript: oasis sweep → villages/troops → farm lists → export + handoff.
 7. End-to-end on a live world; tune throttle and validate token/selector parsing.
