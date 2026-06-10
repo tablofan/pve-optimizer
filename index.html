@@ -11,7 +11,7 @@
     :root {
       --bg: #141110; --surface: #1d1916; --inset: #15120f; --head: #201b17;
       --line: #2e2823; --line-strong: #3c352d;
-      --ink: #ece7df; --ink-dim: #b9b1a5; --ink-faint: #857d71;
+      --ink: #ece7df; --ink-dim: #b9b1a5; --ink-faint: #8e8478;
       --gold: #d9a84e; --gold-soft: #b09c72; --gold-dim: #8a7a52; --gold-ink: #1a1510;
       --ok: #97d6a0; --err: #e08a5a;
     }
@@ -50,21 +50,24 @@
       border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 8px;
       transition: border-color .12s, box-shadow .12s;
     }
-    textarea:focus, input:focus, select:focus { outline: none; border-color: var(--gold-dim); box-shadow: 0 0 0 3px rgba(217, 168, 78, .12); }
+    textarea:focus, input:focus, select:focus { border-color: var(--gold-dim); box-shadow: 0 0 0 3px rgba(217, 168, 78, .12); }
+    textarea:focus:not(:focus-visible), input:focus:not(:focus-visible), select:focus:not(:focus-visible) { outline: none; }
     textarea { width: 100%; min-height: 70px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; padding: 8px; }
     input[type=number] { width: 70px; font-variant-numeric: tabular-nums; }
     label.chk {
       display: inline-flex; align-items: center; gap: 7px; background: var(--inset);
       border: 1px solid var(--line-strong); border-radius: 999px; padding: 5px 12px;
-      cursor: pointer; font-size: .8rem; color: var(--ink-dim); user-select: none;
+      cursor: pointer; font-size: .8rem; color: var(--ink-dim); -webkit-user-select: none; user-select: none;
       transition: border-color .12s, background .12s, color .12s;
     }
     label.chk input { accent-color: var(--gold); width: 13px; height: 13px; margin: 0; }
+    label.chk:focus-within { border-color: var(--gold-dim); }
+    label.chk:has(input:focus-visible) { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
     label.chk.on { border-color: var(--gold-dim); background: rgba(217, 168, 78, .08); color: var(--ink); }
     .muted { color: var(--ink-faint); font-size: .8rem; }
     table { width: 100%; border-collapse: collapse; font-size: .82rem; }
     th, td { padding: 8px 10px; text-align: left; white-space: nowrap; }
-    th { font-size: .67rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--line-strong); z-index: 1; }
+    th { font-size: .67rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; position: sticky; top: 0; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line-strong); z-index: 1; }
     td { color: var(--ink); font-variant-numeric: tabular-nums; }
     tr + tr td { border-top: 1px solid var(--line); }
     tr:hover td { background: rgba(255, 255, 255, .022); }
@@ -72,6 +75,10 @@
     th:last-child:not(.num), td:last-child:not(.num) { width: 100%; }
     #pvpUsage { width: auto; min-width: 40%; }
     .num { text-align: right; }
+    .scroll > table tr:last-child td { border-bottom: 1px solid var(--line); }
+    #vilTable th, #vilTable td { padding: 8px 5px; }
+    #vilTable input.vtr { width: 62px; padding: 5px 6px; }
+    input.dim { color: var(--ink-faint); }
     .scroll { overflow: auto; max-height: 520px; scrollbar-width: thin; scrollbar-color: #383027 transparent; }
     .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
     .scroll::-webkit-scrollbar-thumb { background: #383027; border-radius: 5px; border: 2px solid var(--surface); }
@@ -102,8 +109,10 @@
     .warnchip { color: var(--err); cursor: help; margin-left: 4px; }
     select.vrole { padding: 3px 4px; }
     td.short { color: var(--err); font-weight: 600; }
-    .vgroup { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--inset); }
-    .vgroup-h { font-weight: 600; font-size: .85rem; color: var(--ink); padding: 9px 12px; background: var(--head); border-bottom: 1px solid var(--line); }
+    .vgroup { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--inset); }
+    .vgroup-h { font-weight: 600; font-size: .85rem; color: var(--ink); padding: 9px 12px; background: var(--head); border-bottom: 1px solid var(--line); border-radius: 9px 9px 0 0; }
+    .vgroup tr:last-child td:first-child { border-bottom-left-radius: 9px; }
+    .vgroup tr:last-child td:last-child { border-bottom-right-radius: 9px; }
     .vgroup table th { background: var(--inset); }
     tr.pending { opacity: .55; }
     .steps { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
@@ -129,7 +138,7 @@
       <div class="section">
         <div class="section-title">Data</div>
         <div class="steps">
-          <div class="step"><span class="step-n">1</span><div><b>Scan oases</b> with the Collector userscript on your gameworld — it sweeps the whole map for free oases.</div></div>
+          <div class="step"><span class="step-n">1</span><div><b>Scan oases</b> with the <a href="collector.user.js">Collector userscript</a> (needs Tampermonkey) on your gameworld — it sweeps the whole map for free oases.</div></div>
           <div class="step"><span class="step-n">2</span><div><b>Send page</b> from each relevant page (village sidebar, <i>expanded</i> farm lists, troops overview). Data accumulates here.</div></div>
           <div class="step"><span class="step-n">3</span><div><b>Or import below</b> — a saved page (.htm), an oases-only file, or a full JSON dataset.</div></div>
         </div>
@@ -161,6 +170,7 @@
 
     <!-- ════ Tab: Oasis Optimizer ════ -->
     <div class="tabpane" id="tab-oasis">
+      <p class="muted" id="hintOasis">No data yet — start on the <b>Data &amp; villages</b> tab: Send from the collector, import a file, or Load sample.</p>
       <div class="section hidden" id="secCfg">
         <div class="section-title">Cavalry &amp; filters</div>
         <p class="muted" style="margin-bottom:8px">Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed.</p>
@@ -186,6 +196,7 @@
 
     <!-- ════ Tab: Oasis browser ════ -->
     <div class="tabpane" id="tab-browse">
+      <p class="muted" id="hintBrowse">No data yet — the browser needs villages and an oasis scan. Start on the <b>Data &amp; villages</b> tab.</p>
       <div class="section hidden" id="secBrowse">
         <div class="section-title">Oasis browser <span class="muted" style="text-transform:none;letter-spacing:0">— free oases around one village, nearest first; independent of the optimizer</span></div>
         <div class="row">
@@ -202,6 +213,7 @@
 
     <!-- ════ Tab: PvP Optimizer ════ -->
     <div class="tabpane" id="tab-pvp">
+      <p class="muted" id="hintPvp">No data yet — start on the <b>Data &amp; villages</b> tab: Send from the collector, import a file, or Load sample.</p>
       <div class="section hidden" id="secPvp">
         <div class="section-title">PvP Optimizer <span class="muted" style="text-transform:none;letter-spacing:0">— reassigns your existing PvP farms (non-oasis farm-list targets, with their current sends) among Role-pvp villages; never adds or drops a farm</span></div>
         <div class="row">
@@ -521,6 +533,10 @@
         renderBrowseControls(); renderBrowse();
         $('secBrowse').classList.remove('hidden');
       }
+      // first-run hints on the other tabs: visible only while their sections are hidden
+      $('hintOasis').classList.toggle('hidden', !!STATE.data.villages.length);
+      $('hintPvp').classList.toggle('hidden', !!STATE.data.villages.length);
+      $('hintBrowse').classList.toggle('hidden', !!(STATE.data.villages.length && STATE.data.oases.length));
     }
 
     // ── tribe / cavalry / resource controls ──
@@ -660,7 +676,7 @@
         list.forEach(function (u) {
           var c = (v.troops && v.troops[u.slot]) || 0;
           var on = sel.indexOf(u.slot) >= 0;
-          body += '<td><input type="number" class="vtr" data-slot="' + u.slot + '" value="' + esc(c) + '" min="0" style="width:76px' + (on ? '' : ';color:#857d71') + '"></td>';
+          body += '<td><input type="number" class="vtr' + (on ? '' : ' dim') + '" data-slot="' + u.slot + '" value="' + esc(c) + '" min="0"></td>';
         });
         var now = currentUsage(v), plan = planUsage(v);
         body += '<td class="vbud num"><b>' + budgetOf(v, sel) + '</b></td>';
@@ -1025,7 +1041,7 @@
     $('fileInput').addEventListener('change', function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.readAsText(f); });
     $('btnPaste').addEventListener('click', function () { ingestText($('pasteBox').value); });
     $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData).catch(function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
-    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; STATE.lastPvp = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse', 'secPvp'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; ['pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable'].forEach(function (s) { $(s).innerHTML = ''; }); $('pvpStatus').innerHTML = ''; renderTribeSel(); setTab('data'); status('Cleared.'); });
+    $('btnClear').addEventListener('click', function () { if (!confirm('Clear all imported data? You will need to re-scan and re-send pages.')) return; STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; STATE.lastPvp = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse', 'secPvp'].forEach(function (s) { $(s).classList.add('hidden'); }); ['hintOasis', 'hintBrowse', 'hintPvp'].forEach(function (s) { $(s).classList.remove('hidden'); }); $('cavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; ['pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable'].forEach(function (s) { $(s).innerHTML = ''; }); $('pvpStatus').innerHTML = ''; renderTribeSel(); setTab('data'); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
     $('btnPvp').addEventListener('click', runPvp);
