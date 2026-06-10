@@ -20,10 +20,23 @@ window.addEventListener('load', async () => {
     const $ = id => D.getElementById(id);
 
     log(!$('secBrowse').classList.contains('hidden'), 'browser section visible after data');
-    log(/5 · Plan/.test($('secRes').textContent), 'Plan renumbered to 5');
+    log(D.querySelectorAll('#tabBar .tab-btn').length === 4, 'tab bar has 4 tabs');
+    log($('tab-data').classList.contains('on'), 'data tab active by default');
     const opts = $('brVil').options;
-    log(opts.length === 3, 'village dropdown has all 3 villages', 'got ' + opts.length);
+    log(opts.length === 5, 'village dropdown has all 5 villages', 'got ' + opts.length);
     log(/A001 \(-18\|-93\)/.test(opts[0].textContent), 'dropdown label is "name (x|y)"', opts[0].textContent);
+
+    // roles derived from the lists: oasis farms -> pve, pvp farms -> pvp, no farms -> off
+    const roleOf = name => {
+      const tr = Array.prototype.find.call($('vilTable').querySelectorAll('tr[data-did]'),
+        r => r.cells[1].textContent === name);
+      return tr && tr.querySelector('.vrole').value;
+    };
+    log(roleOf('A001') === 'pve', 'A001 derives Role pve', roleOf('A001'));
+    log(roleOf('P007') === 'pvp', 'P007 derives Role pvp', roleOf('P007'));
+    log(roleOf('S006') === 'off', 'empty S006 derives Role off', roleOf('S006'));
+    const a001row = Array.prototype.find.call($('vilTable').querySelectorAll('tr[data-did]'), r => r.cells[1].textContent === 'A001');
+    log(!!a001row.querySelector('.warnchip'), 'A001 (both kinds) shows a conflict chip');
 
     let rows = $('brTable').querySelectorAll('tr');
     let dists = Array.prototype.slice.call(rows, 1).map(tr => parseFloat(tr.cells[1].textContent));
@@ -73,6 +86,19 @@ window.addEventListener('load', async () => {
     W.document.getElementById('btnRun').click();
     await tick(800);
     log(!$('secRes').classList.contains('hidden') && /Oases farmed/.test($('cards').textContent), 'Optimise still works after refactor', $('cards').textContent.slice(0, 40));
+
+    // ── PvP tab: rebalance end-to-end ──
+    Array.prototype.find.call(D.querySelectorAll('#tabBar .tab-btn'), b => b.getAttribute('data-tab') === 'pvp').click();
+    await tick(100);
+    log($('tab-pvp').classList.contains('on') && !$('tab-data').classList.contains('on'), 'pvp tab activates');
+    $('btnPvp').click();
+    await tick(400);
+    log(/PvP farms/.test($('pvpCards').textContent), 'pvp cards render', $('pvpCards').textContent.slice(0, 60));
+    log(/→ P008/.test($('pvpTable').textContent), 'the P007 farm beside P008 is proposed as a move', '');
+    log(/Frozen/.test($('pvpWarn').textContent) && /A001/.test($('pvpWarn').textContent), 'A001 frozen PvP farms warned');
+    log(/All PvP farms fit/.test($('pvpStatus').textContent), 'no shortfall on the sample', $('pvpStatus').textContent);
+    const usage = $('pvpUsage').textContent;
+    log(/P007/.test(usage) && /P008/.test(usage), 'usage table lists both pvp villages');
   } catch (e) {
     log(false, 'EXCEPTION', e && (e.message + ' @ ' + (e.stack || '').split('\n')[1]));
   }

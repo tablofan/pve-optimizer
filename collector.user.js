@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         PvE Optimizer — Collector
+// @name         Farm Optimizer — Collector
 // @namespace    https://github.com/ren/pve-optimizer
-// @version      0.6.0
-// @description  Scan all free oases (map API) on a Travian T4.6 gameworld and send them (or download them as a file) — plus the current page's HTML — to the PvE Optimizer calculator, which does the parsing.
+// @version      0.7.0
+// @description  Scan all free oases (map API) on a Travian T4.6 gameworld and send them (or download them as a file) — plus the current page's HTML — to the Farm Optimizer calculator, which does the parsing.
 // @match        *://*.travian.com/*
 // @run-at       document-idle
 // @grant        none
@@ -137,7 +137,7 @@
     var p = document.createElement('div');
     p.style.cssText = 'position:fixed;right:10px;top:80px;z-index:99999;width:300px;background:#1c1917;color:#e0e0e0;border:1px solid #57534e;border-radius:8px;font:12px/1.4 Segoe UI,sans-serif;padding:10px;box-shadow:0 4px 16px rgba(0,0,0,.5)';
     p.innerHTML =
-      '<div style="font-weight:600;color:#f5f0e8;margin-bottom:6px">PvE Optimizer — Collector</div>' +
+      '<div style="font-weight:600;color:#f5f0e8;margin-bottom:6px">Farm Optimizer — Collector</div>' +
       '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">Map ± <input id="pveRad" type="number" title="world half-size, e.g. 200 for a −200..200 map" style="width:54px" value="' + CFG.radius + '"> Step <input id="pveStep" type="number" style="width:44px" value="' + CFG.step + '"></div>' +
       '<input id="pveCalc" placeholder="Calculator URL (required)" style="width:100%;margin-bottom:6px" value="' + (CFG.calcUrl || '') + '">' +
       '<div style="display:flex;gap:4px;flex-wrap:wrap"><button id="pveScan">Scan oases</button><button id="pveSendO">Send oases</button><button id="pveDlO">Download oases</button><button id="pveSendP">Send this page</button></div>' +

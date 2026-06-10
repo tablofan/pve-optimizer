@@ -98,10 +98,13 @@ point from which oases are farmed. Each village has a **Role**.
 A per-village declaration of which optimizer may plan from that **Village**: **PvE** (the oasis
 optimizer), **PvP** (the **PvP optimizer**), or **off** (neither). Roles are exclusive — no village
 is ever planned by both sides, which is what keeps the two plans jointly feasible without a shared
-troop budget. A village's default role derives from its **Current farm lists** the first time it is
-seen (free-oasis targets → PvE; **PvP farms** → PvP; both → PvE plus a conflict warning; no farms →
-off); after that the player's stored choice wins, and a stored role contradicted by the lists gets
-the same warning — never a silent re-derivation.
+troop budget. A village's default role derives from its **Current farm lists** (free-oasis targets →
+PvE; **PvP farms** → PvP; both → PvE plus a conflict warning) — but only once there is *evidence*:
+an oasis scan must exist and the village must show farms in some list. A village with no visible
+farms merely *displays* as off — nothing is pinned, so data arriving later can still derive it; only
+the player's explicit choice stores a role for an empty village. Once stored, the choice wins, and a
+stored role contradicted by the lists (any role, off included) gets a warning — never a silent
+re-derivation.
 _Avoid_: include / "Use" (the boolean it replaces), village type.
 
 **Cavalry**:

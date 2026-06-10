@@ -216,53 +216,30 @@ t('oases at the same tile are deduped in buildInstance', () => {
   assert.strictEqual(inst.oases.length, 1, 'duplicate tile collapsed');
 });
 
-console.log('travel cap (max one-way travel)');
-t('cap drops far-but-affordable pairs; no cap keeps them (back-compat)', () => {
+console.log('no reachability cap (ADR-0002 — removed travel-cap bolt-on)');
+t('far-but-affordable pairs stay candidates; a legacy maxTravelMin key is ignored', () => {
   // Marauder base14 -> 28 f/h. Oasis at 28 fields = 60 min one-way; at 1 field ≈ 2.14 min.
   const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t4: 1000 } }],
     oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }, { x: 28, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }],
     farmLists: [] };
   const cfg = { units: UNITS.huns, selectedSlots: ['t4'], includedDids: [1],
     resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } } };
-  const noCap = PVE.buildInstance(data, cfg);
-  assert.strictEqual(noCap.maxPossible, 2, 'both reachable without a cap');
-  assert.strictEqual(noCap.maxTravelMin, null, 'no cap recorded');
-  const capped = PVE.buildInstance(data, Object.assign({}, cfg, { maxTravelMin: 30 }));
-  assert.strictEqual(capped.maxPossible, 1, 'far oasis pruned by the 30 min cap');
-  assert(capped.pairs.every(p => p.travelMin <= 30), 'no pair beyond the cap');
-  assert.strictEqual(capped.maxTravelMin, 30, 'cap recorded on the instance');
-  const zero = PVE.buildInstance(data, Object.assign({}, cfg, { maxTravelMin: 0 }));
-  assert.strictEqual(zero.maxPossible, 2, '0 = no cap');
+  assert.strictEqual(PVE.buildInstance(data, cfg).maxPossible, 2, 'both reachable');
+  const legacy = PVE.buildInstance(data, Object.assign({}, cfg, { maxTravelMin: 30 })); // stale persisted config
+  assert.strictEqual(legacy.maxPossible, 2, 'legacy cap key has no effect');
 });
-t('currently-farmed oasis beyond the cap -> remove with reason "out of range"', () => {
-  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t4: 1000 } }],
-    oases: [{ x: 28, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }],
-    farmLists: [{ listId: 1, name: 'A', villageDid: 1, targets: [{ x: 28, y: 0 }] }] };
-  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t4'], includedDids: [1],
-    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } }, maxTravelMin: 30 });
-  const rows = PVE.planDiff(data, inst, PVE.solve(inst, {}), []);
-  const rem = rows.find(x => x.status === 'remove' && x.x === 28 && x.y === 0);
-  assert(rem && /out of range/.test(rem.reason), 'tagged out of range, got: ' + (rem && rem.reason));
-  assert(/30 min/.test(rem.reason), 'reason names the cap');
-});
-t('budget-caused out-of-range does NOT blame the cap (even when a cap is set)', () => {
-  // 5 fields ≈ 9.4 min travel — well inside the 30 min cap — but cost 4 > budget 1.
+t('unaffordable current target -> remove with reason "unaffordable (cost exceeds every budget)"', () => {
+  // 5 fields ≈ 9.4 min travel, cost 4 > budget 1.
   const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t4: 1 } }],
     oases: [{ x: 5, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }],
     farmLists: [{ listId: 1, name: 'A', villageDid: 1, targets: [{ x: 5, y: 0 }] }] };
-  const cfg = { units: UNITS.huns, selectedSlots: ['t4'], includedDids: [1],
-    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } } };
-  const capped = PVE.buildInstance(data, Object.assign({}, cfg, { maxTravelMin: 30 }));
-  assert.strictEqual(capped.pairs.length, 0, 'no feasible pair (budget too small)');
-  const remCap = PVE.planDiff(data, capped, PVE.solve(capped, {}), [])
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t4'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } } });
+  assert.strictEqual(inst.pairs.length, 0, 'no feasible pair (budget too small)');
+  const rem = PVE.planDiff(data, inst, PVE.solve(inst, {}), [])
     .find(x => x.status === 'remove' && x.x === 5 && x.y === 0);
-  assert(remCap && /cost exceeds every budget/.test(remCap.reason),
-    'budget blamed, not the cap — got: ' + (remCap && remCap.reason));
-  // and the no-cap branch words it the same way
-  const uncapped = PVE.buildInstance(data, cfg);
-  const remNo = PVE.planDiff(data, uncapped, PVE.solve(uncapped, {}), [])
-    .find(x => x.status === 'remove' && x.x === 5 && x.y === 0);
-  assert(remNo && /cost exceeds every budget/.test(remNo.reason), 'no-cap branch, got: ' + (remNo && remNo.reason));
+  assert(rem && /unaffordable \(cost exceeds every budget\)/.test(rem.reason),
+    'unaffordable reason, got: ' + (rem && rem.reason));
 });
 
 console.log('ILP timeout safety net');
@@ -470,6 +447,260 @@ t('membership: per-list duplicate target counted once; two lists on one tile bot
   assert.strictEqual(rows.length, 1);
   assert.deepStrictEqual(rows[0].farmLists.map(l => l.name).sort(), ['L1', 'L2']); // dup once; both lists kept
   assert.strictEqual(rows[0].farmLists.find(l => l.name === 'L1').village, 'A');   // village resolved via villageDid
+});
+
+console.log('pvp rebalancer — comp speed & instance classification');
+t('compSpeed = slowest unit in the send, infantry included; empty comp -> null', () => {
+  assert.strictEqual(PVE.compSpeed({ t4: 10 }, UNITS.huns), 16);            // Steppe Rider
+  assert.strictEqual(PVE.compSpeed({ t4: 10, t6: 1 }, UNITS.huns), 14);     // Marauder slower
+  assert.strictEqual(PVE.compSpeed({ t4: 10, t1: 20 }, UNITS.huns), 6);     // Mercenary (infantry!) sets speed
+  assert.strictEqual(PVE.compSpeed({}, UNITS.huns), null);
+  assert.strictEqual(PVE.compSpeed(null, UNITS.huns), null);
+  assert.strictEqual(PVE.compSpeed({ t4: 0 }, UNITS.huns), null, 'zero-count slot does not count');
+});
+t('pvp farm = list entry whose target is NOT a free oasis; free-oasis targets excluded', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
+    oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }],
+    farmLists: [{ listId: 1, name: 'L', villageDid: 1, targets: [
+      { x: 1, y: 0, comp: { t6: 5 } },   // free oasis -> NOT a pvp farm
+      { x: 2, y: 0, comp: { t6: 5 } },   // player village / occupied -> pvp farm
+    ] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(inst.farms.length, 1);
+  assert.strictEqual(inst.farms[0].x, 2);
+  assert.strictEqual(inst.farms[0].curDid, 1);
+});
+t('exclusions are reported, never silently dropped: unresolved / frozen / noComp', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } },
+               { did: 2, name: 'B', x: 5, y: 0, troops: { t6: 100 } }],
+    oases: [],
+    farmLists: [
+      { listId: 1, name: 'orphan', villageDid: null, targets: [{ x: 9, y: 9, comp: { t6: 5 } }] },     // unresolved
+      { listId: 2, name: 'pveheld', villageDid: 2, targets: [{ x: 8, y: 8, comp: { t6: 5 } }] },        // holder not Role-PvP
+      { listId: 3, name: 'mine', villageDid: 1, targets: [{ x: 7, y: 7 }, { x: 6, y: 6, comp: {} }] },  // no comp ×2
+    ] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(inst.farms.length, 0, 'nothing rebalanceable');
+  assert.strictEqual(inst.excluded.unresolved, 1);
+  assert.strictEqual(inst.excluded.frozen.length, 1);
+  assert.strictEqual(inst.excluded.frozen[0].listName, 'pveheld');
+  assert.strictEqual(inst.excluded.noComp.length, 2);
+});
+t('duplicate targets across lists are independent farms (double-farming intentional)', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } },
+               { did: 2, name: 'B', x: 5, y: 0, troops: { t6: 100 } }],
+    oases: [],
+    farmLists: [
+      { listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 3, y: 0, comp: { t6: 5 } }] },
+      { listId: 2, name: 'LB', villageDid: 2, targets: [{ x: 3, y: 0, comp: { t4: 10 } }] } ] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(inst.farms.length, 2, 'both entries kept');
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.rows.length, 2, 'both entries in the result');
+});
+
+console.log('pvp rebalancer — overload repair (the motivating example)');
+t('overloaded village spills to the village with slack; nearest-to-receiver moves first', () => {
+  // A holds two farms costing 8 Marauders each but stocks only 10; B (at x=10) has 100 free.
+  // Interval 60 min keeps waves at 1 (travel ≤ ~20 min), so demand = comp.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 10 } },
+               { did: 2, name: 'B', x: 10, y: 0, troops: { t6: 100 } }],
+    oases: [],
+    farmLists: [{ listId: 1, name: 'LA', villageDid: 1, targets: [
+      { x: 1, y: 0, comp: { t6: 8 } },    // close to A
+      { x: 9, y: 0, comp: { t6: 8 } },    // close to B — this one should move
+    ] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  const r = PVE.pvpRebalance(inst, {});
+  const f1 = r.rows.find(x => x.x === 1), f9 = r.rows.find(x => x.x === 9);
+  assert.strictEqual(f9.status, 'move', 'farm nearest the receiver moves');
+  assert.strictEqual(f9.toDid, 2);
+  assert.strictEqual(f1.status, 'keep', 'the close farm stays home');
+  assert.strictEqual(r.shortfalls.length, 0, 'overload fully repaired');
+  assert.strictEqual(r.moves, 1, 'exactly one move — no churn');
+});
+t('soft keep, hard move: an unfixable overload stays put and reports a per-type shortfall', () => {
+  // A stocks 5 Marauders, farm needs 8; B exists but stocks only 7 -> move would overload B, forbidden.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 5 } },
+               { did: 2, name: 'B', x: 2, y: 0, troops: { t6: 7 } }],
+    oases: [],
+    farmLists: [{ listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 1, y: 0, comp: { t6: 8 } }] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.rows[0].status, 'keep', 'farm stays with its over-committed holder');
+  assert.strictEqual(r.shortfalls.length, 1);
+  assert.strictEqual(r.shortfalls[0].did, 1);
+  assert.strictEqual(r.shortfalls[0].slot, 't6');
+  assert.strictEqual(r.shortfalls[0].short, 3, '8 used - 5 stock');
+});
+t('multi-type sends need EVERY type in stock at the destination', () => {
+  // Farm sends Steppe Riders + Mercenaries. B has riders but no infantry -> cannot receive.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t4: 5, t1: 5 } },
+               { did: 2, name: 'B', x: 2, y: 0, troops: { t4: 100, t1: 0 } }],
+    oases: [],
+    farmLists: [{ listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 1, y: 0, comp: { t4: 10, t1: 10 } }] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(inst.farms[0].speed, 6, 'infantry sets the speed');
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.rows[0].status, 'keep', 'B cannot absorb the infantry component');
+  assert(r.shortfalls.some(s => s.did === 1 && s.slot === 't4' && s.short === 5), 't4 shortfall reported');
+  assert(r.shortfalls.some(s => s.did === 1 && s.slot === 't1' && s.short === 5), 't1 shortfall reported');
+});
+t('demand scales with waves in flight: farther holder ties up comp × ceil(2·travel/interval)', () => {
+  // Marauders 28 f/h. Farm at 28 fields from A = 60 min one-way; interval 30 min -> 4 waves.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 1000 } }],
+    oases: [],
+    farmLists: [{ listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 28, y: 0, comp: { t6: 5 } }] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1],
+    perVillage: { 1: { ts: 0, interval: 30, artefact: 1 } } });
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.rows[0].waves, 4, 'ceil(120/30)');
+  assert.strictEqual(r.usage[0].perSlot.t6.used, 20, '5 Marauders × 4 waves');
+  assert.strictEqual(r.movements, 4, 'movements = Σ waves');
+});
+
+console.log('pvp rebalancer — keep-biased improvement');
+t('feasible-but-bad layout improves: cluster moves to the idle village next door', () => {
+  // A (within budget) farms a cluster ~25 fields away that sits next to B, which idles.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 1000 } },
+               { did: 2, name: 'B', x: 25, y: 0, troops: { t6: 1000 } }],
+    oases: [],
+    farmLists: [{ listId: 1, name: 'LA', villageDid: 1, targets: [
+      { x: 24, y: 0, comp: { t6: 5 } }, { x: 26, y: 0, comp: { t6: 5 } }, { x: 25, y: 1, comp: { t6: 5 } },
+    ] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.moves, 3, 'whole cluster reassigned');
+  r.rows.forEach(x => assert.strictEqual(x.toDid, 2, 'all to B'));
+});
+t('keep bias: a move under the tolerance does not happen; over it, it does', () => {
+  // Farm at dist 3 from A, dist 1 from B -> 2 fields ≈ 4.29 min saving at Marauder speed.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 1000 } },
+               { did: 2, name: 'B', x: 4, y: 0, troops: { t6: 1000 } }],
+    oases: [],
+    farmLists: [{ listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 3, y: 0, comp: { t6: 5 } }] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  const stay = PVE.pvpRebalance(inst, { toleranceMin: 5 });
+  assert.strictEqual(stay.rows[0].status, 'keep', '4.29 min saving < 5 min tolerance');
+  const go = PVE.pvpRebalance(inst, { toleranceMin: 1 });
+  assert.strictEqual(go.rows[0].status, 'move', '4.29 min saving ≥ 1 min tolerance');
+  assert.strictEqual(go.rows[0].toDid, 2);
+  approx(go.rows[0].travelCur - go.rows[0].travelNew, PVE.travelMinutes(3, 14, 1, 0) - PVE.travelMinutes(1, 14, 1, 0));
+});
+t('a move never creates or worsens a shortfall (fits is checked on every slot)', () => {
+  // B is closer to the farm but already saturated by its own farm.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } },
+               { did: 2, name: 'B', x: 10, y: 0, troops: { t6: 10 } }],
+    oases: [],
+    farmLists: [
+      { listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 9, y: 0, comp: { t6: 8 } }] },
+      { listId: 2, name: 'LB', villageDid: 2, targets: [{ x: 11, y: 0, comp: { t6: 8 } }] } ] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  const r = PVE.pvpRebalance(inst, {});
+  const mine = r.rows.find(x => x.listName === 'LA');
+  assert.strictEqual(mine.status, 'keep', 'B (8+8 > 10) must not receive');
+  assert.strictEqual(r.shortfalls.length, 0, 'no shortfall anywhere');
+  // every village ends within stock on every slot it uses
+  r.usage.forEach(u => Object.keys(u.perSlot).forEach(s => assert(u.perSlot[s].used <= u.perSlot[s].stock)));
+});
+
+console.log('pvp rebalancer — review fixes');
+t('phases alternate to a joint fixpoint: a Phase B move frees the capacity a stuck repair needed', () => {
+  // A (stock 0) holds f needing 8; B (stock 10) holds g needing 5; C (stock 5) idles far away.
+  // Round 1: f fits nowhere (B free 5 < 8, C 5 < 8) — stuck; B's own farm g sits beside C and
+  // moves there (big saving). Round 2: B now has 10 free -> f's repair move A->B becomes legal.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 0 } },
+               { did: 2, name: 'B', x: 6, y: 0, troops: { t6: 10 } },
+               { did: 3, name: 'C', x: 20, y: 0, troops: { t6: 5 } }],
+    oases: [],
+    farmLists: [
+      { listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 1, y: 0, comp: { t6: 8 } }] },
+      { listId: 2, name: 'LB', villageDid: 2, targets: [{ x: 19, y: 0, comp: { t6: 5 } }] } ] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2, 3],
+    perVillage: { 1: { ts: 0, interval: 600, artefact: 1 }, 2: { ts: 0, interval: 600, artefact: 1 }, 3: { ts: 0, interval: 600, artefact: 1 } } });
+  const r = PVE.pvpRebalance(inst, {});
+  const f = r.rows.find(x => x.listName === 'LA'), g = r.rows.find(x => x.listName === 'LB');
+  assert.strictEqual(g.status, 'move'); assert.strictEqual(g.toDid, 3, 'g moves beside C');
+  assert.strictEqual(f.status, 'move'); assert.strictEqual(f.toDid, 2, 'freed B absorbs the stuck farm');
+  assert.strictEqual(r.shortfalls.length, 0, 'overload fully repaired across rounds');
+});
+t('unknown comp slots (e.g. an imported t11 hero) are sanitized out, not budgeted against zero stock', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 5 } },
+               { did: 2, name: 'B', x: 10, y: 0, troops: { t6: 100 } }],
+    oases: [],
+    farmLists: [
+      { listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 9, y: 0, comp: { t6: 8, t11: 1 } }] },
+      { listId: 2, name: 'LH', villageDid: 1, targets: [{ x: 2, y: 0, comp: { t11: 1 } }] } ] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1, 2],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(inst.farms.length, 1, 'mixed comp kept (t11 stripped)');
+  assert.deepStrictEqual(inst.farms[0].comp, { t6: 8 }, 't11 gone from the comp');
+  assert.strictEqual(inst.excluded.noComp.length, 1, 'unknown-slot-only comp degrades to noComp');
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.rows[0].status, 'move', 'farm is movable — no phantom t11 pin');
+  assert(!r.shortfalls.some(s => s.slot === 't11'), 'no undisplayable phantom shortfall');
+});
+t('hero in a send is counted for the warning (never a silent drop)', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
+    oases: [],
+    farmLists: [{ listId: 1, name: 'LA', villageDid: 1, targets: [
+      { x: 1, y: 0, comp: { t6: 8 }, hero: true },
+      { x: 2, y: 0, comp: { t6: 8 } } ] }] };
+  const inst = PVE.buildPvpInstance(data, { units: UNITS.huns, pvpDids: [1],
+    perVillage: { 1: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(inst.heroDropped, 1);
+});
+
+console.log('role derivation (pure: farmKinds + deriveRole)');
+t('farmKinds classifies per village against the scanned free-oasis set', () => {
+  const data = {
+    oases: [{ x: 1, y: 0, bonuses: [] }],
+    farmLists: [
+      { listId: 1, villageDid: 1, targets: [{ x: 1, y: 0 }] },              // oasis only
+      { listId: 2, villageDid: 2, targets: [{ x: 9, y: 9 }] },              // pvp only
+      { listId: 3, villageDid: 3, targets: [{ x: 1, y: 0 }, { x: 9, y: 9 }] }, // both
+      { listId: 4, villageDid: null, targets: [{ x: 8, y: 8 }] } ] };       // unresolved -> ignored
+  const k = PVE.farmKinds(data);
+  assert.deepStrictEqual(k[1], { oasis: true, pvp: false });
+  assert.deepStrictEqual(k[2], { oasis: false, pvp: true });
+  assert.deepStrictEqual(k[3], { oasis: true, pvp: true });
+  assert.strictEqual(k[4], undefined);
+});
+t('deriveRole: oasis->pve, pvp->pvp, both->pve; no evidence defers (returns null)', () => {
+  assert.strictEqual(PVE.deriveRole({ oasis: true, pvp: false }, {}), 'pve');
+  assert.strictEqual(PVE.deriveRole({ oasis: false, pvp: true }, {}), 'pvp');
+  assert.strictEqual(PVE.deriveRole({ oasis: true, pvp: true }, {}), 'pve'); // + conflict chip in the UI
+  assert.strictEqual(PVE.deriveRole(null, {}), null, 'no scan yet -> defer');
+  assert.strictEqual(PVE.deriveRole({ oasis: false, pvp: false }, {}), null, 'no farms -> defer (display off, never store)');
+});
+t('deriveRole legacy inc:false: pvp if it holds PvP farms (even alongside oases), else off; defers without evidence', () => {
+  assert.strictEqual(PVE.deriveRole({ oasis: false, pvp: true }, { inc: false }), 'pvp');
+  assert.strictEqual(PVE.deriveRole({ oasis: true, pvp: true }, { inc: false }), 'pvp', 'both-kinds + opted out of pve -> pvp');
+  assert.strictEqual(PVE.deriveRole({ oasis: true, pvp: false }, { inc: false }), 'off');
+  assert.strictEqual(PVE.deriveRole(null, { inc: false }), null, 'legacy migration also waits for a scan');
+  assert.strictEqual(PVE.deriveRole({ oasis: false, pvp: false }, { inc: false }), null, 'legacy + no visible farms -> defer');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed' + (skipped ? ', ' + skipped + ' skipped' : ''));

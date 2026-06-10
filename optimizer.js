@@ -1,5 +1,6 @@
-// PvE Optimizer — core logic (pure, no DOM). Loadable in the browser (window.PVE)
+// Farm Optimizer — core logic (pure, no DOM). Loadable in the browser (window.PVE)
 // and in Node (module.exports) so it can be unit-tested. See docs/PLAN.md + CONTEXT.md.
+// (The PVE namespace name is historical — it now also carries the PvP rebalancer.)
 
 (function (root) {
   'use strict';
@@ -55,9 +56,9 @@
   // data: { tribe, mapRadius, villages:[{did,name,x,y,troops:{tN:count}}],
   //         oases:[{x,y,bonuses:[{res,pct}]}], farmLists:[...] }
   // cfg:  { units, selectedSlots:[..], includedDids:Set/array, resourceFilter:{wood,..},
-  //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …],
-  //         maxTravelMin: number|null  — Travel cap: drop any (oasis,village) pair whose one-way
-  //                                     travel exceeds this many minutes (null/0 = no cap) }
+  //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …] }
+  // There is deliberately NO travel/reachability cap (see ADR-0002): budget feasibility alone
+  // bounds the candidate set, and max-cardinality only takes a far oasis when it adds a farm.
   // units = UNITS[tribe] (slot->unit array). Returns an instance for the solver.
   // `skipped` (a coord key set) removes those oases from every village's candidate set entirely —
   // they are never assigned (a Skipped oasis is a deliberate, global player opt-out). See CONTEXT.md.
@@ -105,13 +106,9 @@
       .map(function (o) { return { x: o.x, y: o.y, bonuses: o.bonuses, res: primaryRes(o.bonuses) }; })
       .filter(function (o) { return o.res && filter[o.res]; });
 
-    // Feasible (oasis,village) pairs with rainbow cost. The Travel cap prunes pairs whose
-    // one-way travel exceeds maxTravelMin BEFORE solving — without it, a long interval makes
-    // the whole map "affordable" for a big village and the solver happily assigns 200-field
-    // farms (and the pair count explodes past what the exact ILP can handle).
-    var cap = (cfg.maxTravelMin && cfg.maxTravelMin > 0) ? cfg.maxTravelMin : null;
+    // Feasible (oasis,village) pairs with rainbow cost. Budget feasibility is the only pruning
+    // (cost grows with distance, so it naturally bounds the candidate set — see ADR-0002).
     var pairs = [];
-    var capBlocked = {}; // oi -> true if some village would take it but-for the cap (for honest diff reasons)
     var radius = data.mapRadius != null ? data.mapRadius : 200;
     oases.forEach(function (o, oi) {
       villages.forEach(function (v, vi) {
@@ -119,8 +116,7 @@
         var dist = distance(o.x, o.y, v.x, v.y, radius);
         var tmin = travelMinutes(dist, baseSpeed, v.artefact, v.ts);
         var cost = oasisCost(tmin, v.interval);
-        if (!(cost <= v.budget && isFinite(cost))) return; // unaffordable regardless of the cap
-        if (cap && tmin > cap) { capBlocked[oi] = true; return; } // affordable, but beyond the Travel cap
+        if (!(cost <= v.budget && isFinite(cost))) return; // unaffordable
         pairs.push({ oi: oi, vi: vi, cost: cost, dist: dist, travelMin: tmin });
       });
     });
@@ -131,8 +127,7 @@
     var maxPossible = Object.keys(feasibleOases).length;
 
     return { villages: villages, oases: oases, pairs: pairs, baseSpeed: baseSpeed,
-             selectedSlots: selected, maxPossible: maxPossible, maxTravelMin: cap,
-             capBlocked: capBlocked };
+             selectedSlots: selected, maxPossible: maxPossible };
   }
 
   // ── Greedy solvers (always available; also the exact-path incumbent) ─
@@ -296,18 +291,12 @@
     // scanned free oases by key (only these are in scope)
     var freeByKey = {};
     inst.oases.forEach(function (o) { freeByKey[key(o.x, o.y)] = o; });
-    // oases with >= 1 feasible (oasis,village) pair — anything else is out of range for every
-    // village (beyond the Travel cap, or costlier than any budget), not a solver choice.
+    // oases with >= 1 feasible (oasis,village) pair — anything else is unaffordable for every
+    // village (cost exceeds every budget), not a solver choice.
     var reachableByKey = {};
     inst.pairs.forEach(function (p) {
       var o = inst.oases[p.oi];
       reachableByKey[key(o.x, o.y)] = true;
-    });
-    // …and of those, the ones some village could afford but-for the cap (so the reason
-    // names the knob that actually binds — a budget-only failure must not blame the cap).
-    var capBlockedByKey = {};
-    inst.oases.forEach(function (o, oi) {
-      if (inst.capBlocked && inst.capBlocked[oi]) capBlockedByKey[key(o.x, o.y)] = true;
     });
     // all scanned free oases (incl. filtered-out) — to flag "filtered" removals
     var allFreeByKey = {};
@@ -351,7 +340,7 @@
       var o = allFreeByKey[k];
       var reason = skippedKey[k] ? 'skipped'
         : !freeByKey[k] ? 'excluded by resource filter'
-        : !reachableByKey[k] ? (capBlockedByKey[k] ? 'out of range (beyond ' + inst.maxTravelMin + ' min travel cap)' : 'out of range (cost exceeds every budget)')
+        : !reachableByKey[k] ? 'unaffordable (cost exceeds every budget)'
         : 'over capacity / not optimal';
       curByKey[k].forEach(function (fromDid) {
         rows.push(row(o, 'remove', null, fromDid, vName, reason));
@@ -416,13 +405,247 @@
     return rows;
   }
 
+  // ── PvP rebalancer (see CONTEXT.md "PvP farm" / "PvP optimizer" + ADR-0004) ────────────
+  // A PvP farm = a farm-list ENTRY whose target is NOT a scanned free oasis (player village or
+  // occupied oasis), plus the troop comp that entry currently sends. The farm set is fixed —
+  // the rebalancer decides WHO holds each entry, never whether it is farmed. Duplicate targets
+  // across entries are independent farms (double-farming is intentional).
+
+  // slowest unit in a send comp sets its travel speed — ANY unit type, infantry included
+  // (unlike the cavalry-only oasis side). Returns null for an empty/unknown comp.
+  function compSpeed(comp, units) {
+    var spd = Infinity;
+    (units || []).forEach(function (u) {
+      if (comp && comp[u.slot] > 0) spd = Math.min(spd, u.speed);
+    });
+    return isFinite(spd) ? spd : null;
+  }
+
+  // ── per-village Role derivation (pure; the UI persists the result — see CONTEXT.md "Role") ──
+  // did -> { oasis: bool, pvp: bool }: which farm kinds each village's lists currently hold,
+  // classified against the scanned free-oasis set.
+  function farmKinds(data) {
+    var free = {};
+    (data.oases || []).forEach(function (o) { free[o.x + '|' + o.y] = true; });
+    var kinds = {};
+    (data.farmLists || []).forEach(function (l) {
+      if (l.villageDid == null) return;
+      var k = kinds[l.villageDid] || (kinds[l.villageDid] = { oasis: false, pvp: false });
+      (l.targets || []).forEach(function (t) { if (free[t.x + '|' + t.y]) k.oasis = true; else k.pvp = true; });
+    });
+    return kinds;
+  }
+  // The role to STORE for a village with no stored role yet, or null to defer.
+  // Pass kind = null when there is no oasis scan yet (without one every target would look like a
+  // PvP farm) — and a village with NO visible farms also defers: it *displays* as off but is not
+  // pinned, so a farm-list page that arrives later can still derive it. Only an explicit player
+  // choice stores a role for an empty village.
+  // Legacy: stored.inc === false (the old "Use" checkbox, unticked) maps to pvp if the village
+  // holds PvP farms (even alongside oasis farms — the player had already opted it out of oasis
+  // farming), else off.
+  function deriveRole(kind, stored) {
+    if (!kind || (!kind.oasis && !kind.pvp)) return null;
+    if (stored && stored.inc === false) return kind.pvp ? 'pvp' : 'off';
+    return kind.oasis ? 'pve' : 'pvp';
+  }
+
+  // data: as buildInstance. cfg: { units, pvpDids:[did…], perVillage:{did:{ts,interval,artefact}} }
+  // Only Role-PvP villages (cfg.pvpDids) participate. Farms excluded from the rebalance — never
+  // silently dropped, always reported back:
+  //   unresolved — the owning farm list's village could not be resolved to a did
+  //   frozen     — the holder is not a Role-PvP village (both-kind / off / unknown)
+  //   noComp     — no usable troop comp on the entry (not parsed, all-zero, or hero-only)
+  function buildPvpInstance(data, cfg) {
+    var eligible = {};
+    (cfg.pvpDids || []).forEach(function (d) { eligible[d] = true; });
+
+    var villages = (data.villages || [])
+      .filter(function (v) { return eligible[v.did]; })
+      .map(function (v) {
+        var pv = (cfg.perVillage && cfg.perVillage[v.did]) || {};
+        var stocks = {};
+        (cfg.units || []).forEach(function (u) { stocks[u.slot] = (v.troops && v.troops[u.slot]) || 0; });
+        return { did: v.did, name: v.name, x: v.x, y: v.y,
+                 ts: pv.ts != null ? pv.ts : 0,
+                 interval: pv.interval != null ? pv.interval : 5,
+                 artefact: pv.artefact != null ? pv.artefact : 1,
+                 stocks: stocks };
+      });
+    var viByDid = {};
+    villages.forEach(function (v, vi) { viByDid[v.did] = vi; });
+
+    var free = {};
+    (data.oases || []).forEach(function (o) { free[o.x + '|' + o.y] = true; });
+    var knownSlot = {};
+    (cfg.units || []).forEach(function (u) { knownSlot[u.slot] = true; });
+
+    var farms = [], unresolved = 0, frozen = [], noComp = [], heroDropped = 0;
+    (data.farmLists || []).forEach(function (l) {
+      (l.targets || []).forEach(function (t) {
+        if (free[t.x + '|' + t.y]) return; // free-oasis target → the oasis optimizer's scope
+        if (t.hero) heroDropped++; // the parse saw a hero in this send — he is ignored, warn once
+        // keep only slots the unit table knows: stocks/speed cover t1..t10 only, so an unknown
+        // key (e.g. an imported t11 hero) would otherwise demand against a hard-zero stock and
+        // pin the farm forever with a phantom, undisplayable shortfall.
+        var comp = {};
+        Object.keys(t.comp || {}).forEach(function (s) { if (knownSlot[s] && t.comp[s] > 0) comp[s] = t.comp[s]; });
+        var farm = { listId: l.listId, listName: l.name, x: t.x, y: t.y,
+                     comp: comp, curDid: l.villageDid };
+        if (l.villageDid == null) { unresolved++; return; }
+        if (viByDid[l.villageDid] == null) { frozen.push(farm); return; }
+        if (!Object.keys(comp).length) { noComp.push(farm); return; }
+        farm.speed = compSpeed(comp, cfg.units);
+        if (farm.speed == null) { noComp.push(farm); return; }
+        farm.curVi = viByDid[l.villageDid];
+        farm.fi = farms.length;
+        farms.push(farm);
+      });
+    });
+    return { villages: villages, farms: farms,
+             radius: data.mapRadius != null ? data.mapRadius : 200, heroDropped: heroDropped,
+             excluded: { unresolved: unresolved, frozen: frozen, noComp: noComp } };
+  }
+
+  // Keep-biased min-travel reassignment with per-unit-type budgets (multi-dimensional — a send
+  // ties up comp × ceil(2 × travel / interval) of EACH type it uses). Budgets are soft for
+  // staying, hard for moving: a farm may remain with an over-committed holder (the current
+  // state being infeasible is the tool's main use case), but a move never creates or worsens
+  // a shortfall. opts: { toleranceMin (default 2), maxPasses (default 25) }.
+  function pvpRebalance(inst, opts) {
+    opts = opts || {};
+    var tol = opts.toleranceMin != null ? opts.toleranceMin : 2;
+    var maxPasses = opts.maxPasses != null ? opts.maxPasses : 25;
+    var V = inst.villages.length;
+
+    // travel + waves per farm × village (waves = round-trips in flight, same physics as oases)
+    var cache = inst.farms.map(function (f) {
+      return inst.villages.map(function (v) {
+        var d = distance(f.x, f.y, v.x, v.y, inst.radius);
+        var tmin = travelMinutes(d, f.speed, v.artefact, v.ts);
+        return { dist: d, travelMin: tmin, waves: oasisCost(tmin, v.interval) };
+      });
+    });
+    function demand(fi, vi) { // per-slot troops tied up by farm fi if held by village vi
+      var f = inst.farms[fi], w = cache[fi][vi].waves, d = {};
+      Object.keys(f.comp).forEach(function (s) { if (f.comp[s] > 0) d[s] = f.comp[s] * w; });
+      return d;
+    }
+
+    var assign = inst.farms.map(function (f) { return f.curVi; });
+    var usage = inst.villages.map(function () { return {}; }); // vi -> slot -> troops used
+    function addUsage(fi, vi, sign) {
+      var d = demand(fi, vi);
+      Object.keys(d).forEach(function (s) { usage[vi][s] = (usage[vi][s] || 0) + sign * d[s]; });
+    }
+    inst.farms.forEach(function (f, fi) { addUsage(fi, f.curVi, +1); });
+
+    function overSlots(vi) {
+      var out = [];
+      Object.keys(usage[vi]).forEach(function (s) {
+        if (usage[vi][s] > (inst.villages[vi].stocks[s] || 0)) out.push(s);
+      });
+      return out;
+    }
+    function fits(fi, vi) { // hard-move rule: the destination absorbs the whole demand in stock
+      var d = demand(fi, vi);
+      return Object.keys(d).every(function (s) {
+        return (usage[vi][s] || 0) + d[s] <= (inst.villages[vi].stocks[s] || 0);
+      });
+    }
+    function move(fi, vi) { addUsage(fi, assign[fi], -1); assign[fi] = vi; addUsage(fi, vi, +1); }
+
+    // Phase A — overload repair (forced moves): while a village is over stock on some slot,
+    // move one of its farms whose comp uses an over slot to the village that can absorb it
+    // with the LEAST travel ("the farms closest to the receiving village move first").
+    var guard = inst.farms.length * V + 10;
+    function phaseA() {
+      var any = false;
+      for (var vi = 0; vi < V; vi++) {
+        var spin = 0;
+        while (overSlots(vi).length && spin++ < guard) {
+          var over = {};
+          overSlots(vi).forEach(function (s) { over[s] = true; });
+          var best = null;
+          inst.farms.forEach(function (f, fi) {
+            if (assign[fi] !== vi) return;
+            if (!Object.keys(f.comp).some(function (s) { return f.comp[s] > 0 && over[s]; })) return;
+            for (var wi = 0; wi < V; wi++) {
+              if (wi === vi || !fits(fi, wi)) continue;
+              var t = cache[fi][wi].travelMin;
+              if (!best || t < best.t) best = { fi: fi, wi: wi, t: t };
+            }
+          });
+          if (!best) break; // nothing legal helps right now — maybe after a Phase B sweep
+          move(best.fi, best.wi); any = true;
+        }
+      }
+      return any;
+    }
+    // Phase B — keep-biased improvement: a farm moves only if it saves >= tol minutes one-way
+    // AND the destination absorbs it (one sweep; returns whether anything moved).
+    function phaseB() {
+      var moved = false;
+      inst.farms.forEach(function (f, fi) {
+        var cur = assign[fi], curT = cache[fi][cur].travelMin;
+        var best = null;
+        for (var wi = 0; wi < V; wi++) {
+          if (wi === cur) continue;
+          var t = cache[fi][wi].travelMin;
+          if (curT - t < tol) continue;
+          if (!fits(fi, wi)) continue;
+          if (!best || t < best.t) best = { wi: wi, t: t };
+        }
+        if (best) { moved = true; move(fi, best.wi); }
+      });
+      return moved;
+    }
+    // Alternate to a JOINT fixpoint: a Phase B move can free exactly the receiver capacity a
+    // stuck Phase A repair needed (B itself would never make that repair — it may increase the
+    // moved farm's travel). Terminates: A strictly shrinks total overload and never creates any;
+    // B strictly shrinks total travel (>= tol per move) and never adds overload — so the
+    // (overload, travel) pair decreases lexicographically with every move.
+    for (var round = 0; round < maxPasses; round++) {
+      var a = phaseA(), b = phaseB();
+      if (!a && !b) break;
+    }
+
+    // result rows (keep / move — the farm set is fixed, nothing is added or removed)
+    var rows = inst.farms.map(function (f, fi) {
+      var vi = assign[fi], c = cache[fi][vi], c0 = cache[fi][f.curVi];
+      return { x: f.x, y: f.y, listId: f.listId, listName: f.listName, comp: f.comp,
+               status: vi === f.curVi ? 'keep' : 'move',
+               fromDid: inst.villages[f.curVi].did, fromVillage: inst.villages[f.curVi].name,
+               toDid: inst.villages[vi].did, toVillage: inst.villages[vi].name,
+               travelCur: c0.travelMin, travelNew: c.travelMin, dist: c.dist, waves: c.waves };
+    });
+    var shortfalls = [];
+    var usageOut = inst.villages.map(function (v, vi) {
+      var perSlot = {};
+      Object.keys(usage[vi]).forEach(function (s) {
+        perSlot[s] = { used: usage[vi][s], stock: v.stocks[s] || 0 };
+        if (usage[vi][s] > (v.stocks[s] || 0)) {
+          shortfalls.push({ did: v.did, name: v.name, slot: s,
+                            used: usage[vi][s], stock: v.stocks[s] || 0,
+                            short: usage[vi][s] - (v.stocks[s] || 0) });
+        }
+      });
+      return { did: v.did, name: v.name, perSlot: perSlot };
+    });
+    var movements = 0;
+    inst.farms.forEach(function (f, fi) { movements += cache[fi][assign[fi]].waves; });
+    return { assign: assign, rows: rows, usage: usageOut, shortfalls: shortfalls,
+             movements: movements, moves: rows.filter(function (r) { return r.status === 'move'; }).length };
+  }
+
   // ── exports ────────────────────────────────────────────────────────
   var PVE = {
     axisSize: axisSize, torusDelta: torusDelta, distance: distance,
     travelMinutes: travelMinutes, oasisCost: oasisCost, primaryRes: primaryRes, RES: RES,
     buildInstance: buildInstance, greedy: greedy, greedyPairs: greedyPairs, bestGreedy: bestGreedy,
     solveExact: solveExact, solve: solve,
-    planDiff: planDiff, browseOases: browseOases
+    planDiff: planDiff, browseOases: browseOases,
+    compSpeed: compSpeed, buildPvpInstance: buildPvpInstance, pvpRebalance: pvpRebalance,
+    farmKinds: farmKinds, deriveRole: deriveRole
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = PVE;
   root.PVE = PVE;

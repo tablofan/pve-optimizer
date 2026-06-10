@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PvE Optimizer</title>
+  <title>Farm Optimizer</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1c1917; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; padding: 24px 16px; }
@@ -45,6 +45,14 @@
     .status { font-size: .8rem; color: #a8a29e; margin-top: 8px; }
     .ok { color: #9fd39f; } .err { color: #e08a5a; }
     .hidden { display: none; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab-btn { background: #292524; border: 1px solid #44403c; border-radius: 8px 8px 0 0; padding: 9px 18px; }
+    .tab-btn.on { background: #34302b; border-color: #8a7a52; color: #f5f0e8; font-weight: 600; }
+    .tabpane { display: none; }
+    .tabpane.on { display: block; }
+    .warnchip { color: #e08a5a; cursor: help; margin-left: 4px; }
+    select.vrole { padding: 3px 4px; }
+    td.short { color: #e08a5a; font-weight: 600; }
     .vgroup { margin-bottom: 14px; }
     .vgroup-h { font-weight: 600; color: #f5f0e8; padding: 7px 10px; background: #1c1917; border: 1px solid #44403c; border-radius: 6px 6px 0 0; }
     .vgroup table { border: 1px solid #44403c; border-top: none; }
@@ -55,82 +63,102 @@
 </head>
 <body>
   <div class="container">
-    <h1>PvE Optimizer</h1>
-    <div class="sub">Oasis farming — Travian (x3, T4.6) · maximise oases farmed across your villages</div>
+    <h1>Farm Optimizer</h1>
+    <div class="sub">Travian (x3, T4.6) · oasis farming + PvP farm rebalancing, planned per village</div>
 
-    <!-- 1. Data -->
-    <div class="section">
-      <div class="section-title">1 · Data</div>
-      <p class="muted" style="margin-bottom:10px">From the <b>Collector</b> userscript on your gameworld: <b>Scan oases</b>, then <b>Send page</b> from each relevant page (village sidebar, <i>expanded</i> farm lists, troops overview). Data accumulates here. Or import a saved page / JSON below.</p>
-      <div class="row">
-        <button id="btnFile">Import file (.json / .htm)…</button>
-        <input type="file" id="fileInput" accept=".json,.htm,.html,application/json,text/html" class="hidden">
-        <button id="btnSample">Load sample</button>
-        <button id="btnClear">Clear data</button>
-        <span class="muted">Tribe:</span> <select id="tribeSel"></select>
-      </div>
-      <div class="row"><textarea id="pasteBox" placeholder="paste a saved page's HTML, or collector JSON…"></textarea></div>
-      <div class="row"><button id="btnPaste">Load pasted</button></div>
-      <div class="status" id="dataStatus">Waiting for data…</div>
+    <div class="tabs" id="tabBar">
+      <button class="tab-btn" data-tab="data">Data &amp; villages</button>
+      <button class="tab-btn" data-tab="oasis">Oasis Optimizer</button>
+      <button class="tab-btn" data-tab="browse">Oasis browser</button>
+      <button class="tab-btn" data-tab="pvp">PvP Optimizer</button>
     </div>
 
-    <!-- 2. Cavalry & filters -->
-    <div class="section hidden" id="secCfg">
-      <div class="section-title">2 · Cavalry &amp; filters</div>
-      <p class="muted" style="margin-bottom:8px">Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed.</p>
-      <div class="row" id="cavRow"></div>
-      <p class="muted" style="margin:12px 0 8px">Farm only these oasis resource types (double oases bucket by their primary/non-crop bonus):</p>
-      <div class="row" id="resRow"></div>
-      <div class="row" style="margin-top:14px">
-        <span class="muted">Sending interval (one value, all villages):</span>
-        <input type="number" id="gIntSec" value="300" min="1" step="1"> <span class="muted">seconds</span>
+    <!-- ════ Tab: Data & villages ════ -->
+    <div class="tabpane" id="tab-data">
+      <div class="section">
+        <div class="section-title">Data</div>
+        <p class="muted" style="margin-bottom:10px">From the <b>Collector</b> userscript on your gameworld: <b>Scan oases</b>, then <b>Send page</b> from each relevant page (village sidebar, <i>expanded</i> farm lists, troops overview). Data accumulates here. Or import a saved page / JSON below.</p>
+        <div class="row">
+          <button id="btnFile">Import file (.json / .htm)…</button>
+          <input type="file" id="fileInput" accept=".json,.htm,.html,application/json,text/html" class="hidden">
+          <button id="btnSample">Load sample</button>
+          <button id="btnClear">Clear data</button>
+          <span class="muted">Tribe:</span> <select id="tribeSel"></select>
+        </div>
+        <div class="row"><textarea id="pasteBox" placeholder="paste a saved page's HTML, or collector JSON…"></textarea></div>
+        <div class="row"><button id="btnPaste">Load pasted</button></div>
+        <div class="status" id="dataStatus">Waiting for data…</div>
       </div>
-      <div class="row" style="margin-top:8px">
-        <span class="muted">Max one-way travel (travel cap, all villages):</span>
-        <input type="number" id="gMaxTravel" value="30" min="0" step="1"> <span class="muted">minutes (0 = no cap — far oases may be assigned)</span>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <span class="muted">Apply to all villages:</span>
-        TS <input type="number" id="gTs" value="0" min="0" max="20">
-        Artefact × <input type="number" id="gArt" value="1" min="0.1" step="0.1">
-        <button id="btnApplyAll">Apply</button>
-      </div>
-    </div>
 
-    <!-- 3. Villages -->
-    <div class="section hidden" id="secVil">
-      <div class="section-title">3 · Villages <span class="muted" style="text-transform:none;letter-spacing:0">— troop counts are editable; type them if not auto-filled from a troops page</span></div>
-      <div class="scroll"><table id="vilTable"></table></div>
-    </div>
-
-    <!-- 4. Oasis browser -->
-    <div class="section hidden" id="secBrowse">
-      <div class="section-title">4 · Oasis browser <span class="muted" style="text-transform:none;letter-spacing:0">— free oases around one village, nearest first; independent of the optimizer</span></div>
-      <div class="row">
-        <span class="muted">Village:</span> <select id="brVil"></select>
-        <span class="muted">Distance (fields)</span>
-        <input type="number" id="brMin" value="0" min="0" step="1"> <span class="muted">to</span>
-        <input type="number" id="brMax" value="30" min="0" step="1">
-        <span class="muted" id="brCount"></span>
-      </div>
-      <div class="row" id="brRes" style="margin-top:10px"></div>
-      <div class="scroll" style="margin-top:10px"><table id="brTable"></table></div>
-    </div>
-
-    <!-- Optimize -->
-    <div class="section hidden" id="secRun">
-      <div class="row">
-        <button class="primary" id="btnRun">Optimise ▶</button>
-        <span class="status" id="solverStatus"></span>
+      <div class="section hidden" id="secVil">
+        <div class="section-title">Villages &amp; roles <span class="muted" style="text-transform:none;letter-spacing:0">— a village farms oases (pve), holds PvP farms (pvp), or neither (off); troop counts are editable if not auto-filled from a troops page</span></div>
+        <div class="row" style="margin-bottom:10px">
+          <span class="muted">Sending interval (one value, all villages):</span>
+          <input type="number" id="gIntSec" value="300" min="1" step="1"> <span class="muted">seconds</span>
+          <span class="muted" style="margin-left:18px">Apply to all villages:</span>
+          TS <input type="number" id="gTs" value="0" min="0" max="20">
+          Artefact × <input type="number" id="gArt" value="1" min="0.1" step="0.1">
+          <button id="btnApplyAll">Apply</button>
+        </div>
+        <div class="scroll"><table id="vilTable"></table></div>
       </div>
     </div>
 
-    <!-- 5. Results -->
-    <div class="section hidden" id="secRes">
-      <div class="section-title">5 · Plan</div>
-      <div class="cards" id="cards"></div>
-      <div class="row" id="diffFilters" style="margin:10px 0"></div>
-      <div class="scroll"><div id="diffTable"></div></div>
+    <!-- ════ Tab: Oasis Optimizer ════ -->
+    <div class="tabpane" id="tab-oasis">
+      <div class="section hidden" id="secCfg">
+        <div class="section-title">Cavalry &amp; filters</div>
+        <p class="muted" style="margin-bottom:8px">Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed.</p>
+        <div class="row" id="cavRow"></div>
+        <p class="muted" style="margin:12px 0 8px">Farm only these oasis resource types (double oases bucket by their primary/non-crop bonus):</p>
+        <div class="row" id="resRow"></div>
+      </div>
+
+      <div class="section hidden" id="secRun">
+        <div class="row">
+          <button class="primary" id="btnRun">Optimise ▶</button>
+          <span class="status" id="solverStatus"></span>
+        </div>
+      </div>
+
+      <div class="section hidden" id="secRes">
+        <div class="section-title">Plan</div>
+        <div class="cards" id="cards"></div>
+        <div class="row" id="diffFilters" style="margin:10px 0"></div>
+        <div class="scroll"><div id="diffTable"></div></div>
+      </div>
+    </div>
+
+    <!-- ════ Tab: Oasis browser ════ -->
+    <div class="tabpane" id="tab-browse">
+      <div class="section hidden" id="secBrowse">
+        <div class="section-title">Oasis browser <span class="muted" style="text-transform:none;letter-spacing:0">— free oases around one village, nearest first; independent of the optimizer</span></div>
+        <div class="row">
+          <span class="muted">Village:</span> <select id="brVil"></select>
+          <span class="muted">Distance (fields)</span>
+          <input type="number" id="brMin" value="0" min="0" step="1"> <span class="muted">to</span>
+          <input type="number" id="brMax" value="30" min="0" step="1">
+          <span class="muted" id="brCount"></span>
+        </div>
+        <div class="row" id="brRes" style="margin-top:10px"></div>
+        <div class="scroll" style="margin-top:10px"><table id="brTable"></table></div>
+      </div>
+    </div>
+
+    <!-- ════ Tab: PvP Optimizer ════ -->
+    <div class="tabpane" id="tab-pvp">
+      <div class="section hidden" id="secPvp">
+        <div class="section-title">PvP Optimizer <span class="muted" style="text-transform:none;letter-spacing:0">— reassigns your existing PvP farms (non-oasis farm-list targets, with their current sends) among Role-pvp villages; never adds or drops a farm</span></div>
+        <div class="row">
+          <button class="primary" id="btnPvp">Rebalance ▶</button>
+          <span class="status" id="pvpStatus"></span>
+        </div>
+        <div id="pvpWarn" style="margin-top:10px"></div>
+        <div class="cards" id="pvpCards" style="margin-top:10px"></div>
+        <div class="scroll" id="pvpUsageWrap" style="margin-top:4px"><table id="pvpUsage"></table></div>
+        <div class="row" id="pvpFilters" style="margin:10px 0"></div>
+        <div class="scroll"><div id="pvpTable"></div></div>
+      </div>
     </div>
   </div>
 
@@ -145,20 +173,22 @@
     var $ = function (id) { return document.getElementById(id); };
     function el(tag, attrs, html) { var e = document.createElement(tag); if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]); if (html != null) e.innerHTML = html; return e; }
     function intSec(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 1) ? n : 300; } // sending interval: whole seconds ≥ 1
-    function capMin(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 0) ? n : 30; } // travel cap: whole minutes ≥ 0 (0 = no cap)
-    function normFilters(f) { // plan-diff status toggles: each defaults on; only explicit false sticks
+    function normStatusFilters(f, statuses) { // diff status toggles: each defaults on; only explicit false sticks
       var src = (f && typeof f === 'object') ? f : {};
       var out = {};
-      ['add', 'move', 'keep', 'remove'].forEach(function (s) { out[s] = src[s] !== false; });
+      statuses.forEach(function (s) { out[s] = src[s] !== false; });
       return out;
     }
+    function normFilters(f) { return normStatusFilters(f, ['add', 'move', 'keep', 'remove']); }
+    function normPvpFilters(f) { return normStatusFilters(f, ['move', 'keep']); }
+    var ROLES = ['pve', 'pvp', 'off']; // per-village Role (see CONTEXT.md): exactly one optimizer may plan from a village
 
     // ── canonical accumulating state (persisted in THIS origin's localStorage) ──
-    var STORE = 'pveData';
+    var STORE = 'pveData'; // key name is historical (pre-rename) — kept so existing data survives
     // `skipped` = ["x|y", …] global per-oasis opt-outs (persisted). `config` = the single global
-    // sending interval (seconds) + travel cap (minutes, 0 = none) + plan-diff status toggles +
-    // per-village TS/artefact/include (persisted; not parsed from the game).
-    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, maxTravelMin: 30, diffFilters: { add: true, move: true, keep: true, remove: true }, perVillage: {} } }; }
+    // sending interval (seconds) + diff status toggles (both tabs) + active tab +
+    // per-village TS/artefact/Role (persisted; not parsed from the game).
+    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, diffFilters: { add: true, move: true, keep: true, remove: true }, pvpDiffFilters: { move: true, keep: true }, activeTab: 'data', perVillage: {} } }; }
     var STATE = { data: blank(), units: null, controls: false, quotaWarned: false };
     function persist() {
       try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); }
@@ -177,9 +207,15 @@
       if (!Array.isArray(d.skipped)) d.skipped = [];
       if (!d.config || typeof d.config !== 'object') d.config = {};
       d.config.intervalSec = intSec(d.config.intervalSec);
-      d.config.maxTravelMin = capMin(d.config.maxTravelMin); // legacy blobs (no key) get the 30 min default
+      delete d.config.maxTravelMin; // travel cap removed (see ADR-0002 update) — drop the stale key
       d.config.diffFilters = normFilters(d.config.diffFilters);
+      d.config.pvpDiffFilters = normPvpFilters(d.config.pvpDiffFilters);
+      if (['data', 'oasis', 'browse', 'pvp'].indexOf(d.config.activeTab) < 0) d.config.activeTab = 'data';
       if (!d.config.perVillage || typeof d.config.perVillage !== 'object') d.config.perVillage = {};
+      Object.keys(d.config.perVillage).forEach(function (k) { // roles: only the three valid values stick
+        var pv = d.config.perVillage[k];
+        if (pv && typeof pv === 'object' && pv.role != null && ROLES.indexOf(pv.role) < 0) delete pv.role;
+      });
     }
 
     // ── text helpers ──
@@ -230,7 +266,15 @@
         w.querySelectorAll('tbody tr.slot').forEach(function (tr) {
           var a = tr.querySelector('td.target a[href*="karte.php?x="]'); if (!a) return;
           var m = (a.getAttribute('href') || '').replace(U_DASH, '-').match(/x=(-?\d+)&(?:amp;)?y=(-?\d+)/);
-          if (m) targets.push({ x: Number(m[1]), y: Number(m[2]) });
+          if (!m) return;
+          var t = { x: Number(m[1]), y: Number(m[2]) };
+          // per-entry send comp from the slot row's unit icons + counts (VALIDATE LIVE) — this is
+          // what the PvP rebalancer budgets with; hero icons are dropped by slotFromClass, but the
+          // drop is flagged so the PvP tab can warn (ADR-0004: never a silent drop).
+          var comp = troopsFromEl(tr);
+          if (Object.keys(comp).length) t.comp = comp;
+          if (tr.querySelector('i[class*="uhero"], img[class*="uhero"], [class*="uhero"]')) t.hero = true;
+          targets.push(t);
         });
         lists.push({ listId: listId, name: name, villageName: villageName, villageDid: null, targets: targets });
       });
@@ -239,8 +283,11 @@
     // Troop icons carry `tN` in their class (e.g. `unit_small tribe6 t4` -> slot t4), paired with a
     // `.value` count. We look for per-village blocks (an ancestor carrying data-did) on the troops
     // overview. Best-effort across patches; the editable village table is the guaranteed fallback.
-    // slot from a unit icon class: `tN` token (e.g. tribe6 t4 -> 4), else global `uN` (((N-1)%10)+1)
+    // slot from a unit icon class: `tN` token (e.g. tribe6 t4 -> 4), else global `uN` (((N-1)%10)+1).
+    // The hero (`uhero`) is ignored everywhere (see CONTEXT.md "Send") — there is one of him and
+    // his speed depends on gear we don't track.
     function slotFromClass(cls) {
+      if (/\buhero\b/i.test(cls)) return null;
       var m = cls.match(/\bt(\d{1,2})\b/); if (m) { var s = +m[1]; return (s >= 1 && s <= 10) ? s : null; }
       var u = cls.match(/\bu(\d{1,2})\b/); if (u) return (((+u[1]) - 1) % 10) + 1;
       return null;
@@ -361,10 +408,10 @@
       STATE.data.server = obj.server || ''; STATE.data.tribe = String(obj.tribe || 'huns').toLowerCase(); STATE.data.mapRadius = Number(obj.mapRadius) || 200;
       STATE.data.scannedAt = (typeof obj.scannedAt === 'string') ? obj.scannedAt : ''; // keep the scan freshness
       if (Array.isArray(obj.skipped)) STATE.data.skipped = obj.skipped.filter(function (k) { return typeof k === 'string'; }); // round-trip skips
-      if (obj.config && typeof obj.config === 'object') { // round-trip the global interval + travel cap + diff toggles + per-village TS/artefact/include
+      if (obj.config && typeof obj.config === 'object') { // round-trip the global interval + diff toggles + per-village TS/artefact/Role
         STATE.data.config.intervalSec = intSec(obj.config.intervalSec);
-        STATE.data.config.maxTravelMin = capMin(obj.config.maxTravelMin);
         STATE.data.config.diffFilters = normFilters(obj.config.diffFilters);
+        STATE.data.config.pvpDiffFilters = normPvpFilters(obj.config.pvpDiffFilters);
         if (obj.config.perVillage && typeof obj.config.perVillage === 'object') STATE.data.config.perVillage = obj.config.perVillage;
       }
       obj.villages.forEach(function (v) {
@@ -377,7 +424,16 @@
       STATE.data.farmLists = (Array.isArray(obj.farmLists) ? obj.farmLists : []).map(function (l) {
         return { listId: l.listId != null ? Number(l.listId) : null, name: String(l.name == null ? '' : l.name), villageName: l.villageName || '',
                  villageDid: (l.villageDid != null && isFinite(Number(l.villageDid))) ? Number(l.villageDid) : null,
-                 targets: Array.isArray(l.targets) ? l.targets.filter(function (t) { return t && isFinite(Number(t.x)) && isFinite(Number(t.y)); }).map(function (t) { return { x: Number(t.x), y: Number(t.y) }; }) : [] };
+                 targets: Array.isArray(l.targets) ? l.targets.filter(function (t) { return t && isFinite(Number(t.x)) && isFinite(Number(t.y)); }).map(function (t) {
+                   var out = { x: Number(t.x), y: Number(t.y) };
+                   if (t.comp && typeof t.comp === 'object') { // per-entry send comp (PvP farms); t1..t10 only — no hero slot
+                     var c = {};
+                     Object.keys(t.comp).forEach(function (k) { if (/^t([1-9]|10)$/.test(k) && Number(t.comp[k]) > 0) c[k] = Number(t.comp[k]); });
+                     if (Object.keys(c).length) out.comp = c;
+                   }
+                   if (t.hero) out.hero = true;
+                   return out;
+                 }) : [] };
       });
       applyData('Imported ' + STATE.data.villages.length + ' villages, ' + STATE.data.oases.length + ' oases, ' + STATE.data.farmLists.length + ' farm lists.');
     }
@@ -398,13 +454,13 @@
       persist();
       if (!STATE.controls) { renderTribeSel(); renderRes(); }
       $('gIntSec').value = STATE.data.config.intervalSec; // global sending interval (seconds)
-      $('gMaxTravel').value = STATE.data.config.maxTravelMin; // global travel cap (minutes, 0 = none)
       $('tribeSel').value = tribe;
       $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span class="ok">') + esc(msg || 'Loaded.') + '</span> <span class="muted">— ' + esc(statusLine()) + '</span>';
       if (STATE.data.villages.length) {
         if (!STATE.controls) { renderCav(); STATE.controls = true; }
+        ensureRoles(); // fill default Roles (stored choices win) before the table renders
         renderVillages();
-        ['secCfg', 'secVil', 'secRun'].forEach(function (s) { $(s).classList.remove('hidden'); });
+        ['secCfg', 'secVil', 'secRun', 'secPvp'].forEach(function (s) { $(s).classList.remove('hidden'); });
       }
       if (STATE.data.villages.length && STATE.data.oases.length) { // browser needs both
         renderBrowseControls(); renderBrowse();
@@ -493,18 +549,58 @@
     }
     function pvCfg(did) { var c = STATE.data.config.perVillage[did]; return (c && typeof c === 'object') ? c : {}; }
     function ensurePv(did) { var pv = STATE.data.config.perVillage; if (!pv[did] || typeof pv[did] !== 'object') pv[did] = {}; return pv[did]; }
-    // TS / artefact / include are per-village and persisted in config (interval is now one global value).
+
+    // ── per-village Role (see CONTEXT.md "Role" + ADR-0004; derivation logic is pure, in
+    // optimizer.js: farmKinds + deriveRole — unit-tested there) ──
+    // Roles derive ONCE per village, but only when there is EVIDENCE: an oasis scan must exist
+    // (without one every target looks like a PvP farm) AND the village must show farms in some
+    // list (a farm-less village only DISPLAYS as off — nothing is stored, so a farm-list page
+    // that arrives later can still derive it; pages can arrive in any order). The stored choice
+    // wins from then on. Legacy `inc:false` (old Use checkbox) migrates under the same evidence
+    // rule: pvp if the village holds PvP farms, else off.
+    function ensureRoles() {
+      var kinds = STATE.data.oases.length ? PVE.farmKinds(STATE.data) : null;
+      var changed = false;
+      STATE.data.villages.forEach(function (v) {
+        var pv = pvCfg(v.did);
+        if (ROLES.indexOf(pv.role) >= 0) { if ('inc' in pv) { delete ensurePv(v.did).inc; changed = true; } return; }
+        var role = PVE.deriveRole(kinds ? (kinds[v.did] || null) : null, pv);
+        if (!role) return; // no evidence yet — defer (keep `inc` so the migration can still fire)
+        var stored = ensurePv(v.did);
+        stored.role = role; delete stored.inc; changed = true;
+      });
+      if (changed) persist();
+    }
+    function roleOf(did) { var r = pvCfg(did).role; return ROLES.indexOf(r) >= 0 ? r : 'off'; }
+    // A stored role contradicted by the lists gets a warning chip — never a silent re-derivation.
+    function roleConflict(v, kinds) {
+      var k = kinds[v.did]; if (!k) return null;
+      var r = pvCfg(v.did).role; // only a STORED role can be contradicted (display-off is provisional)
+      if (r === 'pve' && k.pvp) return 'Also holds PvP farms — they are frozen (excluded from the PvP rebalance) until this is resolved.';
+      if (r === 'pvp' && k.oasis) return 'Also holds oasis farms — the oasis plan may move or remove them.';
+      if (r === 'off' && (k.oasis || k.pvp)) return 'Holds farms but Role is off — neither optimizer plans from it: the oasis plan may reassign its oasis targets, and its PvP farms are frozen.';
+      return null;
+    }
+
+    // TS / artefact / Role are per-village and persisted in config (interval is one global value).
+    // Troop columns show ALL unit types: the oasis side budgets selected cavalry (highlighted),
+    // the PvP side budgets every type a send uses (infantry included).
     function renderVillages() {
-      var sel = selectedSlots(), list = cav(STATE.data.tribe), tbl = $('vilTable');
-      var head = '<tr><th>Use</th><th>Village</th><th>Coords</th>';
+      var sel = selectedSlots(), list = STATE.units || [], tbl = $('vilTable');
+      var kinds = STATE.data.oases.length ? PVE.farmKinds(STATE.data) : {};
+      var head = '<tr><th title="pve = farms oases · pvp = holds PvP farms · off = neither">Role</th><th>Village</th><th>Coords</th>';
       list.forEach(function (u) { head += '<th>' + esc(u.name.split(' ')[0]) + '</th>'; });
       head += '<th>Budget</th><th title="Rainbows the current farm lists tie up (free-oasis targets only)">Now</th>'
             + '<th title="Rainbows used / budget under the last Optimise run">Plan</th><th>TS</th><th>Artefact</th></tr>';
       var body = '';
       STATE.data.villages.forEach(function (v) {
         var s = pvCfg(v.did);
+        var role = roleOf(v.did);
+        var conflict = roleConflict(v, kinds);
         body += '<tr data-did="' + esc(v.did) + '">';
-        body += '<td><input type="checkbox" class="vinc" ' + (s.inc === false ? '' : 'checked') + '></td>';
+        body += '<td><select class="vrole">' + ROLES.map(function (r) {
+          return '<option value="' + r + '"' + (role === r ? ' selected' : '') + '>' + r + '</option>';
+        }).join('') + '</select>' + (conflict ? '<span class="warnchip" title="' + esc(conflict) + '">⚠</span>' : '') + '</td>';
         body += '<td>' + esc(v.name || v.did) + '</td><td>' + mapLink(v.x, v.y) + '</td>';
         list.forEach(function (u) {
           var c = (v.troops && v.troops[u.slot]) || 0;
@@ -533,7 +629,6 @@
     document.addEventListener('input', function (ev) {
       var t = ev.target; if (!t || !t.classList) return;
       if (t.id === 'gIntSec') { STATE.data.config.intervalSec = intSec(t.value); persist(); refreshAllNow(); return; }
-      if (t.id === 'gMaxTravel') { STATE.data.config.maxTravelMin = capMin(t.value); persist(); return; }
       var tr = t.closest && t.closest('tr[data-did]'); if (!tr) return;
       var did = tr.getAttribute('data-did');
       if (t.classList.contains('vtr')) {
@@ -545,9 +640,10 @@
       else if (t.classList.contains('vart')) { var a = Number(t.value); ensurePv(did).artefact = (isFinite(a) && a > 0) ? a : 1; persist(); refreshNow(tr); }
     });
     document.addEventListener('change', function (ev) {
-      var t = ev.target; if (!t || !t.classList || !t.classList.contains('vinc')) return;
+      var t = ev.target; if (!t || !t.classList || !t.classList.contains('vrole')) return;
       var tr = t.closest('tr[data-did]'); if (!tr) return;
-      ensurePv(tr.getAttribute('data-did')).inc = t.checked; persist();
+      ensurePv(tr.getAttribute('data-did')).role = ROLES.indexOf(t.value) >= 0 ? t.value : 'off';
+      persist(); renderVillages(); // re-render so conflict chips track the new role
     });
 
     function applyAll() {
@@ -564,12 +660,23 @@
       var perVillage = {}, included = [];
       Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
         var did = Number(tr.getAttribute('data-did'));
-        if (tr.querySelector('.vinc').checked) included.push(did);
+        if (tr.querySelector('.vrole').value === 'pve') included.push(did); // only Role-pve villages farm oases
         var ts = Number(tr.querySelector('.vts').value), ar = Number(tr.querySelector('.vart').value);
         perVillage[did] = { ts: (isFinite(ts) && ts >= 0) ? ts : 0, interval: intervalMin, artefact: (isFinite(ar) && ar > 0) ? ar : 1 };
       });
-      return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included, resourceFilter: resourceFilter(), perVillage: perVillage, skipped: STATE.data.skipped,
-               maxTravelMin: capMin($('gMaxTravel').value) }; // travel cap (minutes; 0 -> falsy -> no cap in buildInstance)
+      return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included, resourceFilter: resourceFilter(), perVillage: perVillage, skipped: STATE.data.skipped };
+    }
+    // PvP side: per-type stocks come from the villages themselves; only Role-pvp villages take part.
+    function gatherPvpCfg() {
+      var intervalMin = intSec($('gIntSec').value) / 60;
+      var perVillage = {}, pvpDids = [];
+      STATE.data.villages.forEach(function (v) {
+        var pv = pvCfg(v.did);
+        perVillage[v.did] = { ts: (pv.ts != null && pv.ts >= 0) ? pv.ts : 0, interval: intervalMin,
+                              artefact: (pv.artefact != null && pv.artefact > 0) ? pv.artefact : 1 };
+        if (roleOf(v.did) === 'pvp') pvpDids.push(v.did);
+      });
+      return { units: STATE.units, pvpDids: pvpDids, perVillage: perVillage };
     }
 
     // ── oasis browser (read-only; see CONTEXT.md — distance band, nearest-first) ──
@@ -600,7 +707,7 @@
       if (!STATE.data.oases.length) { alert('No oases yet — run "Scan oases" in the collector and Send.'); return; }
       var cfg = gatherCfg();
       if (!cfg.selectedSlots.length) { alert('Select at least one cavalry type.'); return; }
-      if (!cfg.includedDids.length) { alert('Include at least one village.'); return; }
+      if (!cfg.includedDids.length) { alert('No village has Role = pve — set roles in the village table (Data & villages tab).'); return; }
       var inst = PVE.buildInstance(STATE.data, cfg);
       if (!inst.villages.some(function (v) { return v.budget > 0; })) { alert('Every selected village has budget 0 — type cavalry counts in the table (or send a troops page).'); return; }
       // maxExactPairs 50 = measured jsLPSolver cliff (62 pairs already takes 15 s and would eat
@@ -614,7 +721,9 @@
       $('secRes').scrollIntoView({ behavior: 'smooth' });
     }
     function renderResults(inst, result, rows) {
-      var over = result.movements > 20000;
+      // the 20,000 movement cap is account-wide: warn on oasis + PvP combined
+      var combined = result.movements + (STATE.lastPvp ? STATE.lastPvp.result.movements : 0);
+      var over = combined > 20000;
       var skipN = (STATE.data.skipped || []).length;
       var cards = [
         { k: 'Oases farmed', v: result.count + ' / ' + inst.maxPossible },
@@ -622,7 +731,7 @@
         { k: 'Villages used', v: inst.villages.filter(function (_, i) { return result.used[i] > 0; }).length + ' / ' + inst.villages.length }
       ];
       if (skipN) cards.push({ k: 'Skipped', v: skipN });
-      $('cards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('') + (over ? '<div class="card warn"><div class="v">⚠</div><div class="k">over 20,000 movement cap</div></div>' : '');
+      $('cards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('') + (over ? '<div class="card warn"><div class="v">⚠ ' + combined.toLocaleString() + '</div><div class="k">oasis + PvP combined — over the 20,000 movement cap</div></div>' : '');
       // (no method line — solver/cap diagnostics dropped; per-village usage lives in the village table)
       var counts = { add: 0, move: 0, keep: 0, remove: 0 };
       rows.forEach(function (r) { counts[r.status]++; });
@@ -721,6 +830,127 @@
       if (STATE.lastRun) drawDiff(STATE.lastRun.rows); // re-decorate; keeps current filters; re-solve on Optimise
     });
 
+    // ── PvP rebalance (see CONTEXT.md "PvP optimizer" + ADR-0004) ──
+    function unitName(slot) {
+      var list = STATE.units || [];
+      for (var i = 0; i < list.length; i++) if (list[i].slot === slot) return list[i].name.split(' ')[0];
+      return slot;
+    }
+    function compLabel(comp) {
+      return Object.keys(comp || {}).filter(function (s) { return comp[s] > 0; })
+        .map(function (s) { return comp[s] + '×' + esc(unitName(s)); }).join(' + ') || '—';
+    }
+    function runPvp() {
+      if (!STATE.data.oases.length) { alert('Scan + send oases first — without a scan, free-oasis targets cannot be told apart from PvP farms.'); return; }
+      ensureRoles();
+      var cfg = gatherPvpCfg();
+      if (!cfg.pvpDids.length) { alert('No village has Role = pvp — set roles in the village table (Data & villages tab).'); return; }
+      var inst = PVE.buildPvpInstance(STATE.data, cfg);
+      var result = PVE.pvpRebalance(inst, {}); // fixed 2 min keep-bias tolerance — no knob (ADR-0004)
+      STATE.lastPvp = { inst: inst, result: result };
+      renderPvpResults(inst, result);
+    }
+    function renderPvpResults(inst, result) {
+      // warnings — exclusions are surfaced, never silently dropped
+      var vNameOf = {}; STATE.data.villages.forEach(function (v) { vNameOf[v.did] = v.name; });
+      var warns = [];
+      if (inst.excluded.unresolved) warns.push(inst.excluded.unresolved + ' farm(s) in lists whose owning village could not be resolved — re-send the farm-list page with the village sidebar visible.');
+      if (inst.excluded.frozen.length) {
+        var byHolder = {};
+        inst.excluded.frozen.forEach(function (f) { var n = vNameOf[f.curDid] || f.curDid; (byHolder[n] = byHolder[n] || 0); byHolder[n]++; });
+        warns.push('Frozen (holder is not Role-pvp): ' + Object.keys(byHolder).map(function (n) { return byHolder[n] + ' on ' + esc(n); }).join(', ') + ' — flip the holder\'s Role to pvp, or move those entries by hand.');
+      }
+      if (inst.excluded.noComp.length) warns.push(inst.excluded.noComp.length + ' farm(s) without a readable troop comp (or hero-only) — re-send the farm-list page; entries are budgeted by their configured send.');
+      if (inst.heroDropped) warns.push('Hero ignored on ' + inst.heroDropped + ' send(s) — travel and budget are computed from the rest of the comp (his speed depends on untracked gear).');
+      $('pvpWarn').innerHTML = warns.map(function (w) { return '<div class="status err">⚠ ' + w + '</div>'; }).join('');
+      // cards (the 20,000 movement cap is account-wide: warn on oasis + PvP combined)
+      var combined = result.movements + (STATE.lastRun ? STATE.lastRun.result.movements : 0);
+      var cards = [
+        { k: 'PvP farms', v: String(inst.farms.length) },
+        { k: 'Moves proposed', v: String(result.moves) },
+        { k: 'Outgoing movements', v: result.movements.toLocaleString(), warn: combined > 20000 },
+        { k: 'Shortfalls', v: String(result.shortfalls.length), warn: result.shortfalls.length > 0 }
+      ];
+      $('pvpCards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('')
+        + (combined > 20000 ? '<div class="card warn"><div class="v">⚠ ' + combined.toLocaleString() + '</div><div class="k">oasis + PvP combined — over the 20,000 movement cap</div></div>' : '');
+      // per-village × per-type usage (used/stock under the plan; shortfalls highlighted)
+      var slots = {}; result.usage.forEach(function (u) { Object.keys(u.perSlot).forEach(function (s) { slots[s] = true; }); });
+      var slotList = (STATE.units || []).map(function (u) { return u.slot; }).filter(function (s) { return slots[s]; });
+      var head = '<tr><th>Village</th>' + slotList.map(function (s) { return '<th>' + esc(unitName(s)) + '</th>'; }).join('') + '</tr>';
+      var body = result.usage.map(function (u) {
+        return '<tr><td>' + esc(u.name) + '</td>' + slotList.map(function (s) {
+          var c = u.perSlot[s];
+          if (!c) return '<td class="muted">—</td>';
+          return '<td' + (c.used > c.stock ? ' class="short" title="short ' + (c.used - c.stock) + '"' : '') + '>' + c.used + '/' + c.stock + '</td>';
+        }).join('') + '</tr>';
+      }).join('');
+      $('pvpUsage').innerHTML = inst.villages.length ? head + body : '';
+      $('pvpStatus').innerHTML = result.shortfalls.length
+        ? '<span class="err">' + result.shortfalls.length + ' unresolved shortfall(s) — train troops or trim the listed villages\' farms.</span>'
+        : '<span class="ok">All PvP farms fit within troop stocks.</span>';
+      // keep/move toggles (persisted), then the diff
+      var counts = { move: 0, keep: 0 };
+      result.rows.forEach(function (r) { counts[r.status]++; });
+      var df = STATE.data.config.pvpDiffFilters;
+      $('pvpFilters').innerHTML = ['move', 'keep'].map(function (s) {
+        var on = df[s] !== false;
+        return '<label class="chk' + (on ? ' on' : '') + '" data-st="' + s + '"><input type="checkbox" ' + (on ? 'checked' : '') + '> ' + s + ' <span class="muted">' + counts[s] + '</span></label>';
+      }).join('');
+      Array.prototype.forEach.call($('pvpFilters').querySelectorAll('label'), function (l) {
+        l.querySelector('input').addEventListener('change', function (ev) {
+          l.classList.toggle('on', ev.target.checked);
+          STATE.data.config.pvpDiffFilters[l.getAttribute('data-st')] = ev.target.checked;
+          persist();
+          drawPvpDiff(result.rows);
+        });
+      });
+      drawPvpDiff(result.rows);
+    }
+    // grouped by the farm's CURRENT village (like the oasis diff); a move shows "→ destination".
+    function drawPvpDiff(rows) {
+      var show = {}; Array.prototype.forEach.call($('pvpFilters').querySelectorAll('label'), function (l) { show[l.getAttribute('data-st')] = l.querySelector('input').checked; });
+      var ord = {}, nameByDid = {}; STATE.data.villages.forEach(function (v, i) { ord[v.did] = i; nameByDid[v.did] = v.name; });
+      var statusOrder = { move: 0, keep: 1 };
+      var groups = {}, dids = [];
+      rows.filter(function (r) { return show[r.status]; }).forEach(function (r) {
+        if (!groups[r.fromDid]) { groups[r.fromDid] = []; dids.push(r.fromDid); }
+        groups[r.fromDid].push(r);
+      });
+      dids.sort(function (a, b) { var oa = ord[a] == null ? 1e9 : ord[a], ob = ord[b] == null ? 1e9 : ord[b]; return (oa - ob) || String(a).localeCompare(String(b)); });
+      var html = '';
+      dids.forEach(function (g) {
+        var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
+        html += '<div class="vgroup"><div class="vgroup-h">' + esc(nameByDid[g] != null ? nameByDid[g] : g) + ' <span class="muted">(' + list.length + ')</span></div>'
+          + '<table><tr><th>Action</th><th>Target</th><th>List</th><th>Send</th><th>Waves</th><th>Travel</th><th>Detail</th></tr>'
+          + list.map(function (r) {
+            var travel = r.status === 'move'
+              ? r.travelCur.toFixed(1) + ' → ' + r.travelNew.toFixed(1) + ' min'
+              : r.travelNew.toFixed(1) + ' min';
+            return '<tr><td><span class="badge b-' + r.status + '">' + r.status + '</span></td>'
+              + '<td>' + mapLink(r.x, r.y) + '</td><td class="muted">' + esc(r.listName) + '</td>'
+              + '<td class="muted">' + compLabel(r.comp) + '</td><td class="muted">' + r.waves + '</td>'
+              + '<td class="muted">' + travel + '</td>'
+              + '<td class="muted">' + (r.status === 'move' ? '→ ' + esc(r.toVillage || '?') : '') + '</td></tr>';
+          }).join('') + '</table></div>';
+      });
+      $('pvpTable').innerHTML = html || '<p class="muted">No PvP farms on Role-pvp villages' + (rows.length ? ' for the selected filters' : '') + '.</p>';
+    }
+
+    // ── tabs (active tab persisted) ──
+    var TAB_IDS = ['data', 'oasis', 'browse', 'pvp'];
+    function setTab(t) {
+      if (TAB_IDS.indexOf(t) < 0) t = 'data';
+      TAB_IDS.forEach(function (x) { $('tab-' + x).classList.toggle('on', x === t); });
+      Array.prototype.forEach.call($('tabBar').querySelectorAll('.tab-btn'), function (b) {
+        b.classList.toggle('on', b.getAttribute('data-tab') === t);
+      });
+      if (STATE.data.config.activeTab !== t) { STATE.data.config.activeTab = t; persist(); }
+    }
+    $('tabBar').addEventListener('click', function (ev) {
+      var b = ev.target.closest && ev.target.closest('.tab-btn');
+      if (b) setTab(b.getAttribute('data-tab'));
+    });
+
     // ── ingest: detect JSON vs HTML, route accordingly ──
     // An oases-only JSON ({pve:'oases'} or oases[] with no villages[]) MERGES — keeping villages /
     // farm-lists / troops / config / skips. A full dataset (villages[]+oases[]) replaces via loadData.
@@ -740,9 +970,10 @@
     $('fileInput').addEventListener('change', function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.readAsText(f); });
     $('btnPaste').addEventListener('click', function () { ingestText($('pasteBox').value); });
     $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData).catch(function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
-    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; $('gMaxTravel').value = 30; renderTribeSel(); status('Cleared.'); });
+    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; STATE.lastPvp = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse', 'secPvp'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; ['pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable'].forEach(function (s) { $(s).innerHTML = ''; }); $('pvpStatus').innerHTML = ''; renderTribeSel(); setTab('data'); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
+    $('btnPvp').addEventListener('click', runPvp);
     $('brVil').addEventListener('change', renderBrowse);
     $('brMin').addEventListener('input', renderBrowse);
     $('brMax').addEventListener('input', renderBrowse);
@@ -767,7 +998,7 @@
     // ── boot ──
     restore();
     $('gIntSec').value = STATE.data.config.intervalSec;
-    $('gMaxTravel').value = STATE.data.config.maxTravelMin;
+    setTab(STATE.data.config.activeTab);
     renderTribeSel(); renderRes();
     $('tribeSel').addEventListener('change', onTribeChange); // bound once
     if (STATE.data.villages.length || STATE.data.oases.length) applyData('Restored your last session.'); else status('Waiting for data… (Scan oases + Send page from the collector, or Import a file.)');

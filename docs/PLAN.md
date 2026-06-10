@@ -1,4 +1,4 @@
-# PvE Optimizer — Build Plan
+# Farm Optimizer — Build Plan
 
 Implementation plan for the design captured in `CONTEXT.md` and `docs/adr/0001-0003`. Two artifacts:
 a **Collector** userscript and a static **Calculator** page.
@@ -7,6 +7,14 @@ a **Collector** userscript and a static **Calculator** page.
 > does **no** parsing — it ships the scanned oases and each page's raw HTML to the calculator, which
 > parses villages / farm-lists / troops. Where this plan says "the collector reads/maps …", read it
 > as "the calculator parses …". See `DOCS.md` for the current architecture.
+
+> **Note (2026-06-10, PvP rework):** the tool was renamed **Farm Optimizer** and grew a second
+> optimizer — the **PvP rebalancer** (ADR-0004): farm-list entries whose target is not a free oasis
+> are reassigned among Role-pvp villages, budgeted per unit type by their parsed send comps. With it
+> came per-village **Roles** (pve/pvp/off, replacing the include checkbox), a 4-tab calculator
+> layout, and the **removal of the travel cap** (restoring ADR-0002's no-reachability-cap stance —
+> see the cap paragraph below, kept for history). Sections below describe the oasis side as
+> originally planned; where they say "include", read "Role = pve".
 
 ## Components
 
@@ -60,9 +68,14 @@ a **Collector** userscript and a static **Calculator** page.
   "scannedAt": "<iso>",
   "villages": [{ "did": 12345, "name": "A001", "x": -18, "y": -93, "troops": { "t1": 0, "...": 0, "t10": 0 } }],
   "oases":    [{ "x": -20, "y": -90, "bonuses": [{ "res": "clay", "pct": 25 }, { "res": "crop", "pct": 25 }] }],
-  "farmLists":[{ "listId": 1, "name": "A001 oases", "villageDid": 12345, "targets": [{ "x": -20, "y": -90 }] }]
+  "farmLists":[{ "listId": 1, "name": "A001 oases", "villageDid": 12345,
+                 "targets": [{ "x": -20, "y": -90 }, { "x": -19, "y": -88, "comp": { "t6": 20, "t1": 30 } }] }]
 }
 ```
+
+A target's optional `comp` (`tN` → count) is the send the farm-list entry currently dispatches —
+parsed from the slot row's unit icons (`VALIDATE LIVE`; the hero is dropped). The PvP rebalancer
+budgets with it; free-oasis targets ignore it.
 
 The collector can also **Download oases** as an oases-only subset of this contract —
 `{ "pve":"oases", "oases":[…], "server":…, "mapRadius":…, "scannedAt":… }` — which the calculator's
@@ -81,15 +94,14 @@ rather than the full replace that a complete dataset triggers.
   **global** value entered in the UI in **seconds**; it is divided by 60 (→ minutes) at the
   `gatherCfg` boundary so the optimizer's cost model stays in minutes. (Was: per-village, minutes.)
 - `budget[v] = min` over selected cavalry types of that village's count.
-- **Travel cap** (`cfg.maxTravelMin`, one **global** value in **minutes**, 0/null = none, default 30):
-  pairs with `tt > cap` are dropped in `buildInstance` before solving; a pair that fails the budget
-  test is pruned as unaffordable regardless of the cap (so diff reasons can name the knob that
-  actually binds). Rationale (measured on a real 16,648-oasis world at interval 190 s): without the
-  cap every oasis is affordable to a large village (cost ≈ 1.46×dist ≤ 355 ≪ budget 613), so the
-  solver may assign farms up to **243 fields** away — and the pair count (51,007) swamps any exact
-  method. With a 30 min cap: 248 pairs, max dist ~13 fields, same farm count (150 — the count gain
-  over the old greedy comes from the best-of-two construction below, not the cap; the cap's payoff
-  is sane assignments and a tractable instance).
+- **Travel cap — REMOVED (2026-06-10).** A global max one-way travel (default 30 min) briefly pruned
+  pairs in `buildInstance`, added after a measured uncapped run assigned farms up to 243 fields away
+  (16,648-oasis world, interval 190 s: cost ≈ 1.46×dist ≤ 355 ≪ budget 613; 51,007 pairs). It was
+  removed per the ADR-0002 update: the 51k-pair instance solves in ~80 ms under best-of-two greedy
+  (the exact ILP is gated at ≤ 50 pairs regardless), max-cardinality with the cheapest-packing
+  tie-break only takes a far oasis when it adds a farm, and an extra far farm is pure gain when
+  budget is spare. The diff reason "out of range" collapsed into **unaffordable** (cost exceeds
+  every budget). A stale `maxTravelMin` config key is deleted on restore.
 - **Skip** (global opt-out): coords in `cfg.skipped` are dropped from the candidate set in
   `buildInstance`, so they are never assigned; `planDiff` is also given the skip set so a
   currently-farmed skipped target is tagged `remove (skipped)` rather than misread as resource-filtered.
@@ -123,8 +135,8 @@ rather than the full replace that a complete dataset triggers.
 - Match current farm-list targets to scanned free oases by coordinates; **only free oases are in
   scope** (village / occupied-oasis targets ignored).
 - Per oasis: **keep / add / move / remove**; removals reason-tagged (over capacity, excluded by the
-  resource filter, **out of range** — no feasible pair left: beyond the travel cap or over every
-  budget —, duplicate, or **skipped**). A current target that is no longer a free oasis
+  resource filter, **unaffordable** — cost exceeds every budget —, duplicate, or **skipped**).
+  A current target that is no longer a free oasis
   (annexed) or is a village is silently ignored — the collector only emits free oases, so such
   targets fall out of scope rather than being flagged. Each row links to `…/karte.php?x=&y=`.
 - **Grouped by village** in the UI: keep/move/remove under the oasis's *current* holder, add under its
@@ -132,6 +144,24 @@ rather than the full replace that a complete dataset triggers.
   mirrored under the destination — each group is the current contents of that village's list). Empty
   groups hidden; groups ordered as the in-game village sidebar. Skipped oases that are *not* currently
   farmed list under "Skipped, not farmed"; every skip row has an **unskip** control.
+
+## PvP rebalancer (as built, 2026-06-10 — see ADR-0004)
+
+- **Scope**: every farm-list entry whose target is *not* a scanned free oasis is a **PvP farm** —
+  target + parsed send `comp`. The set is fixed; only the holder changes. Duplicate targets across
+  entries are independent farms.
+- **Eligibility**: only **Role-pvp** villages participate (`buildPvpInstance(data, {units, pvpDids,
+  perVillage})`). Excluded-but-reported: `unresolved` (list owner unknown), `frozen` (holder not
+  Role-pvp — e.g. a both-kind village), `noComp` (no readable send / hero-only).
+- **Cost**: per-unit-type, `demand = comp × ceil(2 × travel / interval)` against the holder's
+  `t1..t10` stocks; speed = slowest unit in the comp (infantry included; hero ignored).
+- **Solve** (`pvpRebalance(inst, {toleranceMin: 2})`): Phase A repairs overloads (move the farm
+  closest to a receiver that can absorb it — the motivating "spill to the village with free troops"
+  case); Phase B is keep-biased improvement (move only on a ≥ 2 min one-way saving, fixed constant,
+  no knob); the phases **alternate to a joint fixpoint** (a B move can free the receiver capacity a
+  stuck A repair needed). **Soft keep, hard move**: staying over budget is allowed and reported as per-type
+  shortfalls; a move never creates or worsens one. Output: keep/move rows (grouped by current
+  holder in the UI), per-village × per-type used/stock, shortfalls, Σ-waves movement estimate.
 
 ## Build order
 

@@ -29,10 +29,14 @@ the player's villages. Its shape:
 - **Villages are role-partitioned** — `role ∈ {pve, pvp, off}`, persisted per village, replacing
   the boolean `inc`. The oasis optimizer plans only from PvE-role villages; the PvP optimizer only
   from PvP-role villages. Defaults derive once from the current lists (free-oasis targets → PvE;
-  PvP farms → PvP; both → PvE + conflict warning; no farms → **off**); the stored choice then wins,
-  and a stored role contradicted by the lists is warned about, never silently re-derived. A
-  both-kind village's PvP farms are frozen (not rebalanced) until resolved; entries in lists whose
-  owning village is unresolved are likewise excluded with a warning.
+  PvP farms → PvP; both → PvE + conflict warning) — but only on **evidence**: an oasis scan must
+  exist and the village must show farms in some list. A farm-less village *displays* as off without
+  being pinned (collector pages arrive in any order — deriving "off" from a not-yet-sent farm-list
+  page would lock every village out), so **off** is stored only by explicit player choice. The
+  stored choice then wins, and a stored role contradicted by the lists (off included) is warned
+  about, never silently re-derived. A both-kind village's PvP farms are frozen (not rebalanced)
+  until resolved; entries in lists whose owning village is unresolved are likewise excluded with a
+  warning.
 - **Display-only diff, keep / move only** (per ADR-0003's ethos) — nothing is ever added or removed.
 
 ## Context
@@ -68,10 +72,11 @@ is claimed by neither side until its role is set explicitly.
 
 - The farm-list parser must capture per-entry send compositions (today: coordinates only) — new
   selectors to `VALIDATE LIVE`; the data contract's `targets` entries grow a per-unit comp.
-- `config.perVillage[did].inc` migrates to `role`: `inc:false` → `off` (or `pvp` if the village
-  holds PvP farms); unset → the derived defaults above. **Empty villages now default to off** — a
-  deliberate behaviour change: a troops-only village no longer receives oasis assignments until its
-  role is set to PvE.
+- `config.perVillage[did].inc` migrates to `role` under the same evidence rule: `inc:false` →
+  `pvp` if the village holds PvP farms (even alongside oasis farms — the player had already opted
+  it out of oasis farming), else `off`; unset → the derived defaults above. **Empty villages now
+  default to off** — a deliberate behaviour change: a troops-only village no longer receives oasis
+  assignments until its role is set to PvE.
 - The min-cost fixed-set formulation is a second solver shape beside the max-cardinality GAP;
   greedy machinery is reusable, but the objective, keep-bias, and soft-keep feasibility rules
   differ.

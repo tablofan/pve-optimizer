@@ -1,11 +1,19 @@
-# PvE Optimizer
+# Farm Optimizer
 
-A browser tool for optimizing **oasis farming** in Travian (x3 speed, T4.6). It maximizes the total
-number of free oases farmed across your villages — each oasis assigned to at most one village, within
-each village's cavalry capacity.
+A browser tool for planning farming in Travian (x3 speed, T4.6). Two optimizers share one dataset:
 
-See `CONTEXT.md` for the domain glossary, `docs/adr/` for architecture decisions, and `docs/PLAN.md`
-for the build plan / data contract.
+- **Oasis optimizer** — maximizes the total number of free oases farmed across your Role-pve
+  villages: each oasis assigned to at most one village, within each village's cavalry capacity.
+- **PvP optimizer** — reassigns your *existing* PvP farms (farm-list entries whose target is not a
+  free oasis, with their configured sends) among your Role-pvp villages, minimizing total travel.
+  It never adds or drops a farm.
+
+Every village has a **Role** (pve / pvp / off) — exactly one optimizer may plan from it, so the two
+plans never compete for the same troops. (The tool was named "PvE Optimizer" before the PvP side
+existed; the repo slug may lag.)
+
+See `CONTEXT.md` for the domain glossary, `docs/adr/` for architecture decisions (ADR-0004 covers
+the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
 
 ## Two parts
 
@@ -18,20 +26,27 @@ for the build plan / data contract.
    villages / farm-lists / troops, and the calculator parses it. (Parsing lives in the calculator so
    selectors can be fixed by redeploying the page, with no userscript reinstall.) Never writes to the game.
 2. **Calculator** (`index.html`) — a static page that **accumulates** sent data (oases + each sent
-   page) and **persists** it in localStorage. It parses villages / farm-lists / troops from sent
-   pages, lets you pick ≤3 cavalry types (carry-0 cavalry — scouts — are excluded; the picker shows
-   speed only), set **one global sending interval (seconds)** and **travel cap (max one-way minutes,
-   0 = none)** + per-village TS / artefact (all persisted), **edit troop counts** (fallback when a
-   troops page isn't sent), filter by resource, and Optimise. The village table shows per-village
-   **Now** (current usage — rainbows the existing farm lists tie up, free-oasis targets only) and
-   **Plan** (used/budget under the last run) columns. Shows a **display-only plan diff grouped by village**
-   (keep / add / move / remove; the status toggles persist; a move stays under its *current* village tagged `→ destination`), lets
-   you **skip** individual oases (a global opt-out — re-Optimise excludes them; persisted), each oasis
-   linking to the in-game map. An **Oasis browser** section lists the free oases around any one
-   village (inclusive distance band, nearest-first, its own resource filter, current farm-list
-   membership) — independent of the optimizer, needs no cavalry counts. Import accepts a saved page
-   (`.htm`), an **oases-only file** (merged in, keeping villages/lists/config/skips), or a full JSON
-   dataset (replaces).
+   page) and **persists** it in localStorage, presented in four tabs:
+   - **Data & villages** — import (saved page `.htm`, an **oases-only file** — merged in, keeping
+     villages/lists/config/skips — or a full JSON dataset, which replaces), the **one global sending
+     interval (seconds)**, and the village table: per-village **Role** (pve / pvp / off — defaults
+     derive once from the current lists: oasis farms → pve, PvP farms → pvp, both → pve + a conflict
+     chip, empty → off; your stored choice then wins), TS / artefact, **editable troop counts** for
+     every unit type (fallback when a troops page isn't sent), plus **Now** (current usage — rainbows
+     the existing farm lists tie up, free-oasis targets only) and **Plan** (used/budget under the
+     last Optimise) columns.
+   - **Oasis Optimizer** — pick ≤3 cavalry types (carry-0 cavalry — scouts — are excluded; the
+     picker shows speed only), filter by resource, Optimise. Shows a **display-only plan diff
+     grouped by village** (keep / add / move / remove; the status toggles persist; a move stays
+     under its *current* village tagged `→ destination`), lets you **skip** individual oases (a
+     global opt-out — re-Optimise excludes them; persisted), each oasis linking to the in-game map.
+   - **Oasis browser** — the free oases around any one village (inclusive distance band,
+     nearest-first, its own resource filter, current farm-list membership) — independent of the
+     optimizers, needs no cavalry counts.
+   - **PvP Optimizer** — Rebalance reassigns the existing PvP farms among Role-pvp villages
+     (keep / move only), with a per-village × per-unit-type **used/stock** table, shortfall
+     highlighting, and warnings for entries it must exclude (unresolved list owner, frozen —
+     holder not Role-pvp —, or no readable send comp).
 
    *Why send the page, not the map?* Villages/farm-lists/troops all live on one rendered page each
    (Send page captures them). The **map** doesn't: it renders as raster image tiles with no per-tile
@@ -42,8 +57,8 @@ for the build plan / data contract.
 
 | File | Purpose |
 |------|---------|
-| `index.html` | Calculator UI + wiring (imports the data, runs the optimizer, renders the plan diff). |
-| `optimizer.js` | Pure core logic — torus distance, travel/cost model, greedy + exact-ILP solver, plan diff, oasis-browser query. Loadable in browser and Node. |
+| `index.html` | Calculator UI + wiring (tabs, imports, both optimizers, plan diffs, roles). |
+| `optimizer.js` | Pure core logic — torus distance, travel/cost model, greedy + exact-ILP oasis solver, PvP rebalancer, plan diff, oasis-browser query. Loadable in browser and Node. |
 | `cavalry.js` | Per-tribe unit table (name / type / speed / carry), `t1..t10` slot mapping. |
 | `collector.user.js` | Tampermonkey collector userscript. |
 | `sample-data.json` | Sample dataset to try the calculator without the game. |
@@ -52,25 +67,36 @@ for the build plan / data contract.
 
 ## How it works
 
-- **Cavalry model** — a "rainbow" = 1 of each selected cavalry type; a village's budget = `min` over
-  the selected types' counts; an oasis costs `ceil(2 × travel / interval)` rainbows (the **interval is
-  entered in seconds** in the UI and converted to minutes for the cost model). The slowest
-  selected unit sets travel speed (base ×2 for the speed server, ×artefact whole-trip, +20%/TS level
-  beyond 20 fields). Distance is Euclidean on the wrapping −200..+200 map.
-- **Optimizer** — a max-cardinality Generalized Assignment Problem. The **travel cap** prunes any
-  (oasis, village) pair beyond the max one-way minutes *before* solving — without it a long interval
-  makes the entire map "affordable" to a big village and the solver assigns 200-field farms. The
-  workhorse is a **best-of-two greedy**: per-oasis cheapest-first *and* global cheapest-pair packing
-  (sort all pairs by cost, assign while oasis free + budget left), keeping the better result — pair
-  packing fixes the budget-burn cascade where an oasis whose cheap village is full immediately grabs
-  an expensive fallback (benchmarked on a real 16,648-oasis world: +20 oases on the uncapped real
-  account, +202 on a synthetic 20-village one; ties capped configs, where greedy is provably
-  optimal). If every reachable oasis is placed the result is flagged optimal; otherwise the exact
-  ILP is tried only at ≤50 pairs (`jsLPSolver`, CDN — its branch-and-bound cliffs at ~60 pairs:
-  62 pairs = 15 s, 78 pairs > 5 min), **timeboxed (10 s)**, its result *feasibility-checked* (a
-  timeout can leak the fractional LP relaxation, which rounds to budget violations) and kept only
-  if it beats greedy. The plan shows the **outgoing-movement** estimate (= Σ rainbow cost) against
-  the 20,000 game cap.
+- **Cavalry model (oasis side)** — a "rainbow" = 1 of each selected cavalry type; a village's budget
+  = `min` over the selected types' counts; an oasis costs `ceil(2 × travel / interval)` rainbows (the
+  **interval is entered in seconds** in the UI and converted to minutes for the cost model). The
+  slowest selected unit sets travel speed (base ×2 for the speed server, ×artefact whole-trip,
+  +20%/TS level beyond 20 fields). Distance is Euclidean on the wrapping −200..+200 map.
+- **Oasis optimizer** — a max-cardinality Generalized Assignment Problem over Role-pve villages.
+  There is **no reachability/travel cap** (see the ADR-0002 update — a 30 min cap existed briefly
+  and was removed): budget feasibility alone prunes pairs, and max-cardinality only takes a far
+  oasis when it adds a farm without displacing one. The workhorse is a **best-of-two greedy**:
+  per-oasis cheapest-first *and* global cheapest-pair packing (sort all pairs by cost, assign while
+  oasis free + budget left), keeping the better result — pair packing fixes the budget-burn cascade
+  where an oasis whose cheap village is full immediately grabs an expensive fallback (benchmarked on
+  a real 16,648-oasis world: +20 oases on the real account, +202 on a synthetic 20-village one; the
+  51k-pair uncapped instance solves in ~80 ms). If every reachable oasis is placed the result is
+  flagged optimal; otherwise the exact ILP is tried only at ≤50 pairs (`jsLPSolver`, CDN — its
+  branch-and-bound cliffs at ~60 pairs: 62 pairs = 15 s, 78 pairs > 5 min), **timeboxed (10 s)**,
+  its result *feasibility-checked* (a timeout can leak the fractional LP relaxation, which rounds
+  to budget violations) and kept only if it beats greedy. The plan shows the **outgoing-movement**
+  estimate (= Σ rainbow cost) against the 20,000 game cap.
+- **PvP rebalancer** (ADR-0004) — the farm set is fixed (every farm-list entry whose target isn't a
+  free oasis, with its parsed send comp); only *who holds each entry* changes. All unit types count
+  (infantry included; the hero is ignored): a farm ties up `comp × ceil(2 × travel / interval)` of
+  each type it sends, against the holder's per-type stocks; the slowest unit in the send sets its
+  speed. Two phases **alternating to a joint fixpoint**: **overload repair** (while a village is
+  over stock, move the farm closest to a receiving village that can absorb it) and **keep-biased
+  improvement** (a farm moves only if it saves ≥ 2 min one-way — fixed, no knob); alternation
+  matters because an improvement move can free exactly the receiver capacity a stuck repair
+  needed. Budgets are **soft for staying, hard for moving**: the
+  current state may be over budget (that's the main use case) and shows as per-type shortfalls, but
+  a proposed move never creates or worsens one.
 
 ## Develop / test
 
@@ -86,6 +112,9 @@ google-chrome --headless=new --disable-gpu --virtual-time-budget=10000 \
 
 ## Status
 
-Calculator + core logic built and tested (Node unit tests + headless-browser end-to-end). The
-collector's live DOM/endpoint parsers are written from documented selectors and marked
-`VALIDATE LIVE` — confirm them against a logged-in gameworld (build-plan step 7).
+Calculator + core logic built and tested (Node unit tests + headless-browser end-to-end), including
+the PvP rebalancer. The live DOM/endpoint parsers are written from documented selectors and marked
+`VALIDATE LIVE` — confirm them against a logged-in gameworld (build-plan step 7). The newest of
+these is the **per-entry send comp** parse in the farm-list slot rows (unit icons + counts), which
+the PvP side budgets with — unvalidated entries degrade to a "no readable comp" warning, never a
+silent wrong plan.
