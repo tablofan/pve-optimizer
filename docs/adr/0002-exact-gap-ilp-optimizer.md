@@ -17,6 +17,15 @@ a time budget on a pathological instance.
 > no `glpk.js`/WASM. The greedy cheapest-first heuristic remains the runtime fallback, and also runs
 > when the CDN script fails to load (e.g. offline).
 
+> **Update (2026-06-10):** the "no reachability cap" stance below was temporarily violated — a
+> global **travel cap** (max one-way minutes, default 30) was bolted on in commit 848a563 after an
+> uncapped run on a real 16,648-oasis world assigned farms up to 243 fields away. The cap has since
+> been **removed**, restoring this ADR's original position: feasibility pruning bounds the candidate
+> set, max-cardinality with the cheapest-packing tie-break only takes a far oasis when it adds a
+> farm without displacing one, and the uncapped 51k-pair instance solves in ~80 ms under the
+> best-of-two greedy (the exact ILP is gated at ≤ 50 pairs regardless). With the cap gone, the
+> plan-diff's "out of range" removal reason collapses into "unaffordable (over every budget)".
+
 Formulation (binary `x[o,v]` per feasible oasis-village pair):
 
 - maximize `Σ x[o,v] − ε·Σ cost[o,v]·x[o,v]` (max oases farmed; tie-break to the cheapest packing)
