@@ -16,6 +16,13 @@ a **Collector** userscript and a static **Calculator** page.
 > see the cap paragraph below, kept for history). Sections below describe the oasis side as
 > originally planned; where they say "include", read "Role = pve".
 
+> **Note (2026-06-11, Movement planner):** the calculator grew a fifth tab — the **Movement
+> planner** (see `CONTEXT.md`): the oasis solve re-run with every Role-pve village's budget
+> replaced by one uniform hypothetical **Movement budget** (`buildInstance`'s `budgetOverride`),
+> reporting per village the movements consumed = the stock of each selected cavalry type to train.
+> Display only, no plan diff; it carries its own cavalry picker (seeded from the optimizer's) and
+> resource filter.
+
 ## Components
 
 ### A. Collector — Tampermonkey userscript (read-only, runs on the gameworld)

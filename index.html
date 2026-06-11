@@ -86,7 +86,7 @@
     tr:hover td { background: rgba(255, 255, 255, .022); }
     td.muted { color: var(--ink-dim); }
     th:last-child:not(.num), td:last-child:not(.num) { width: 100%; }
-    #pvpUsage { width: auto; min-width: 40%; }
+    #pvpUsage, #mpTroops { width: auto; min-width: 40%; }
     .num { text-align: right; }
     .scroll > table tr:last-child td { border-bottom: 1px solid var(--line); }
     #vilTable th, #vilTable td { padding: 8px 5px; }
@@ -100,6 +100,7 @@
        the last (non-.num) column absorbs slack; overflowing free text ellipsizes rather than zigzagging */
     #diffTable .vgroup, #pvpTable .vgroup { max-width: 1100px; }
     #brTable { max-width: 980px; }
+    #mpTable .vgroup { max-width: 980px; }
     #diffTable table, #pvpTable table { table-layout: fixed; }
     #diffTable td, #pvpTable td { overflow: hidden; text-overflow: ellipsis; }
     #diffTable th:nth-child(1), #pvpTable th:nth-child(1) { width: 84px; }
@@ -166,6 +167,7 @@
       <button class="tab-btn" data-tab="oasis">Oasis Optimizer</button>
       <button class="tab-btn" data-tab="browse">Oasis browser</button>
       <button class="tab-btn" data-tab="pvp">PvP Optimizer</button>
+      <button class="tab-btn" data-tab="plan">Movement planner</button>
     </div>
 
     <!-- ════ Tab: Data & villages ════ -->
@@ -263,6 +265,30 @@
         <div class="scroll"><div id="pvpTable"></div></div>
       </div>
     </div>
+
+    <!-- ════ Tab: Movement planner ════ -->
+    <div class="tabpane" id="tab-plan">
+      <p class="muted" id="hintPlan">No data yet — start on the <b>Data &amp; villages</b> tab: Send from the collector, import a file, or Load sample.</p>
+      <div class="section hidden" id="secPlan">
+        <div class="section-title">Movement planner <span class="muted" style="text-transform:none;letter-spacing:0">— what would it take? Every Role-pve village gets the same hypothetical movement budget (troop stocks are ignored); the solver then farms as many oases as possible account-wide, each oasis by at most one village</span></div>
+        <p class="muted" style="margin-bottom:8px">Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed. Seeded from the optimizer's selection — changing it here never affects the optimizer.</p>
+        <div class="row" id="mpCavRow"></div>
+        <p class="muted" style="margin:12px 0 8px">Farm only these oasis resource types (double oases bucket by their primary/non-crop bonus):</p>
+        <div class="row" id="mpResRow"></div>
+        <div class="row" style="margin-top:14px">
+          <span class="muted">Movement budget:</span>
+          <input type="number" id="mpBudget" value="1000" min="1" step="1" style="width:90px">
+          <span class="muted">outgoing movements per village — a ceiling, never exceeded</span>
+          <button class="primary" id="btnPlan">Calculate</button>
+        </div>
+      </div>
+      <div class="section hidden" id="secPlanRes">
+        <div class="section-title">What it takes <span class="muted" style="text-transform:none;letter-spacing:0">— display only: current farm lists play no part in the solve and are shown per oasis as information</span></div>
+        <div class="cards" id="mpCards"></div>
+        <div class="scroll" style="margin-top:4px"><table id="mpTroops"></table></div>
+        <div class="scroll" style="margin-top:14px"><div id="mpTable"></div></div>
+      </div>
+    </div>
   </div>
 
   <script src="cavalry.js"></script>
@@ -276,6 +302,7 @@
     var $ = function (id) { return document.getElementById(id); };
     function el(tag, attrs, html) { var e = document.createElement(tag); if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]); if (html != null) e.innerHTML = html; return e; }
     function intSec(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 1) ? n : 300; } // sending interval: whole seconds ≥ 1
+    function intBudget(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 1) ? n : 1000; } // Movement budget: whole movements ≥ 1
     function normStatusFilters(f, statuses) { // diff status toggles: each defaults on; only explicit false sticks
       var src = (f && typeof f === 'object') ? f : {};
       var out = {};
@@ -289,9 +316,9 @@
     // ── canonical accumulating state (persisted in THIS origin's localStorage) ──
     var STORE = 'pveData'; // key name is historical (pre-rename) — kept so existing data survives
     // `skipped` = ["x|y", …] global per-oasis opt-outs (persisted). `config` = the single global
-    // sending interval (seconds) + diff status toggles (both tabs) + active tab +
-    // per-village TS/artefact/Role (persisted; not parsed from the game).
-    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, diffFilters: { add: true, move: true, keep: true, remove: true }, pvpDiffFilters: { move: true, keep: true }, activeTab: 'data', perVillage: {} } }; }
+    // sending interval (seconds) + the Movement budget + diff status toggles (both tabs) +
+    // active tab + per-village TS/artefact/Role (persisted; not parsed from the game).
+    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, movementBudget: 1000, diffFilters: { add: true, move: true, keep: true, remove: true }, pvpDiffFilters: { move: true, keep: true }, activeTab: 'data', perVillage: {} } }; }
     var STATE = { data: blank(), units: null, controls: false, quotaWarned: false };
     function persist() {
       try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); }
@@ -310,10 +337,11 @@
       if (!Array.isArray(d.skipped)) d.skipped = [];
       if (!d.config || typeof d.config !== 'object') d.config = {};
       d.config.intervalSec = intSec(d.config.intervalSec);
+      d.config.movementBudget = intBudget(d.config.movementBudget);
       delete d.config.maxTravelMin; // travel cap removed (see ADR-0002 update) — drop the stale key
       d.config.diffFilters = normFilters(d.config.diffFilters);
       d.config.pvpDiffFilters = normPvpFilters(d.config.pvpDiffFilters);
-      if (['data', 'oasis', 'browse', 'pvp'].indexOf(d.config.activeTab) < 0) d.config.activeTab = 'data';
+      if (['data', 'oasis', 'browse', 'pvp', 'plan'].indexOf(d.config.activeTab) < 0) d.config.activeTab = 'data';
       if (!d.config.perVillage || typeof d.config.perVillage !== 'object') d.config.perVillage = {};
       Object.keys(d.config.perVillage).forEach(function (k) { // roles: only the three valid values stick
         var pv = d.config.perVillage[k];
@@ -513,6 +541,7 @@
       if (Array.isArray(obj.skipped)) STATE.data.skipped = obj.skipped.filter(function (k) { return typeof k === 'string'; }); // round-trip skips
       if (obj.config && typeof obj.config === 'object') { // round-trip the global interval + diff toggles + per-village TS/artefact/Role
         STATE.data.config.intervalSec = intSec(obj.config.intervalSec);
+        STATE.data.config.movementBudget = intBudget(obj.config.movementBudget);
         STATE.data.config.diffFilters = normFilters(obj.config.diffFilters);
         STATE.data.config.pvpDiffFilters = normPvpFilters(obj.config.pvpDiffFilters);
         if (obj.config.perVillage && typeof obj.config.perVillage === 'object') STATE.data.config.perVillage = obj.config.perVillage;
@@ -557,14 +586,19 @@
       persist();
       if (!STATE.controls) { renderTribeSel(); renderRes(); }
       $('gIntSec').value = STATE.data.config.intervalSec; // global sending interval (seconds)
+      $('mpBudget').value = STATE.data.config.movementBudget;
       $('tribeSel').value = tribe;
       $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span class="ok">') + esc(msg || 'Loaded.') + '</span> <span class="muted">— ' + esc(statusLine()) + '</span>'
         + (!isErr && STATE.data.villages.length ? ' <span class="muted">· next: set Roles below, then Optimise on the Oasis Optimizer tab.</span>' : '');
       if (STATE.data.villages.length) {
-        if (!STATE.controls) { renderCav(); STATE.controls = true; }
+        if (!STATE.controls) { renderCav(); renderMpCav(); STATE.controls = true; }
+        // an import / page-send can switch the tribe under existing pickers — re-render them, or
+        // both cavalry rows keep showing the OLD tribe's units while the solve uses the new one's
+        else if (STATE.renderedTribe !== tribe) { renderCav(); renderMpCav(); }
+        STATE.renderedTribe = tribe;
         ensureRoles(); // fill default Roles (stored choices win) before the table renders
         renderVillages();
-        ['secCfg', 'secVil', 'secRun', 'secPvp'].forEach(function (s) { $(s).classList.remove('hidden'); });
+        ['secCfg', 'secVil', 'secRun', 'secPvp', 'secPlan'].forEach(function (s) { $(s).classList.remove('hidden'); });
       }
       if (STATE.data.villages.length && STATE.data.oases.length) { // browser needs both
         renderBrowseControls(); renderBrowse();
@@ -573,6 +607,7 @@
       // first-run hints on the other tabs: visible only while their sections are hidden
       $('hintOasis').classList.toggle('hidden', !!STATE.data.villages.length);
       $('hintPvp').classList.toggle('hidden', !!STATE.data.villages.length);
+      $('hintPlan').classList.toggle('hidden', !!STATE.data.villages.length);
       $('hintBrowse').classList.toggle('hidden', !!(STATE.data.villages.length && STATE.data.oases.length));
     }
 
@@ -581,26 +616,37 @@
       var sel = $('tribeSel'); sel.innerHTML = '';
       TRIBES.forEach(function (t) { var o = document.createElement('option'); o.value = t.id; o.textContent = t.name; sel.appendChild(o); });
     }
-    function onTribeChange() { var sel = $('tribeSel'); STATE.data.tribe = sel.value; STATE.units = UNITS[sel.value]; renderCav(); STATE.controls = true; renderVillages(); persist(); }
+    function onTribeChange() { var sel = $('tribeSel'); STATE.data.tribe = sel.value; STATE.units = UNITS[sel.value]; renderCav(); renderMpCav(); STATE.renderedTribe = sel.value; STATE.controls = true; renderVillages(); persist(); }
+    function renderCavRow(rowEl, preset, onToggle) {
+      rowEl.innerHTML = '';
+      cav(STATE.data.tribe).forEach(function (u) {
+        var on = preset.indexOf(u.slot) >= 0;
+        var lab = el('label', { class: 'chk' + (on ? ' on' : ''), 'data-slot': u.slot });
+        lab.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + '> ' + esc(u.name) + ' <span class="muted">' + u.speed + ' f/h</span>';
+        lab.querySelector('input').addEventListener('change', function (ev) { onToggle(ev, lab); });
+        rowEl.appendChild(lab);
+      });
+    }
     function renderCav() {
-      var row = $('cavRow'); row.innerHTML = '';
       var list = cav(STATE.data.tribe);
       var hasTroops = {};
       STATE.data.villages.forEach(function (v) { list.forEach(function (u) { if (v.troops && v.troops[u.slot]) hasTroops[u.slot] = true; }); });
       var auto = list.filter(function (u) { return hasTroops[u.slot]; }).slice(0, 3).map(function (u) { return u.slot; });
       if (!auto.length) auto = list.slice(0, 3).map(function (u) { return u.slot; }); // sensible default if no counts yet
-      list.forEach(function (u) {
-        var on = auto.indexOf(u.slot) >= 0;
-        var lab = el('label', { class: 'chk' + (on ? ' on' : ''), 'data-slot': u.slot });
-        lab.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + '> ' + esc(u.name) + ' <span class="muted">' + u.speed + ' f/h</span>';
-        lab.querySelector('input').addEventListener('change', function (ev) { onCavToggle(ev, lab); });
-        row.appendChild(lab);
-      });
+      renderCavRow($('cavRow'), auto, onCavToggle);
     }
-    function selectedSlots() { return Array.prototype.map.call($('cavRow').querySelectorAll('label'), function (l) { return l.querySelector('input').checked ? l.getAttribute('data-slot') : null; }).filter(Boolean); }
+    // Movement planner picker — its OWN copy, seeded from the optimizer's current selection
+    // (see CONTEXT.md "Movement planner"): toggling it never reconfigures the optimizer.
+    function renderMpCav() { renderCavRow($('mpCavRow'), selectedSlots(), onMpCavToggle); }
+    function selectedSlotsOf(rowEl) { return Array.prototype.map.call(rowEl.querySelectorAll('label'), function (l) { return l.querySelector('input').checked ? l.getAttribute('data-slot') : null; }).filter(Boolean); }
+    function selectedSlots() { return selectedSlotsOf($('cavRow')); }
     function onCavToggle(ev, lab) {
       if (selectedSlots().length > 3) { ev.target.checked = false; alert('Pick at most 3 cavalry types.'); return; }
       lab.classList.toggle('on', ev.target.checked); renderVillages();
+    }
+    function onMpCavToggle(ev, lab) {
+      if (selectedSlotsOf($('mpCavRow')).length > 3) { ev.target.checked = false; alert('Pick at most 3 cavalry types.'); return; }
+      lab.classList.toggle('on', ev.target.checked);
     }
     function renderResRow(rowEl, onChange) {
       rowEl.innerHTML = '';
@@ -611,8 +657,8 @@
         rowEl.appendChild(lab);
       });
     }
-    // optimizer filter + the browser's own (independent state, same bucketing rule)
-    function renderRes() { renderResRow($('resRow')); renderResRow($('brRes'), renderBrowse); }
+    // optimizer filter + the browser's and Movement planner's own (independent state, same bucketing rule)
+    function renderRes() { renderResRow($('resRow')); renderResRow($('brRes'), renderBrowse); renderResRow($('mpResRow')); }
     function resFilterOf(rowEl) { var f = {}; Array.prototype.forEach.call(rowEl.querySelectorAll('label'), function (l) { f[l.getAttribute('data-res')] = l.querySelector('input').checked; }); return f; }
     function resourceFilter() { return resFilterOf($('resRow')); }
 
@@ -737,6 +783,7 @@
     document.addEventListener('input', function (ev) {
       var t = ev.target; if (!t || !t.classList) return;
       if (t.id === 'gIntSec') { STATE.data.config.intervalSec = intSec(t.value); persist(); refreshAllNow(); return; }
+      if (t.id === 'mpBudget') { var nb = Math.floor(Number(t.value)); if (isFinite(nb) && nb >= 1) { STATE.data.config.movementBudget = nb; persist(); } return; }
       var tr = t.closest && t.closest('tr[data-did]'); if (!tr) return;
       var did = tr.getAttribute('data-did');
       if (t.classList.contains('vtr')) {
@@ -1044,8 +1091,105 @@
       $('pvpTable').innerHTML = html || '<p class="muted">No PvP farms on Role-pvp villages' + (rows.length ? ' for the selected filters' : '') + '.</p>';
     }
 
+    // ── Movement planner (see CONTEXT.md "Movement planner" / "Movement budget") ──
+    // The oasis optimizer's instance with one substitution: every Role-pve village's budget is the
+    // uniform hypothetical Movement budget (stocks ignored), and the cavalry / resource selections
+    // are the planner's own copies. Display only — no plan diff; lists shown per oasis as info.
+    function gatherPlanCfg(budget) {
+      var intervalMin = intSec($('gIntSec').value) / 60;
+      var perVillage = {}, included = [];
+      STATE.data.villages.forEach(function (v) {
+        var pv = pvCfg(v.did);
+        perVillage[v.did] = { ts: (pv.ts != null && pv.ts >= 0) ? pv.ts : 0, interval: intervalMin,
+                              artefact: (pv.artefact != null && pv.artefact > 0) ? pv.artefact : 1 };
+        if (roleOf(v.did) === 'pve') included.push(v.did);
+      });
+      return { units: STATE.units, selectedSlots: selectedSlotsOf($('mpCavRow')), includedDids: included,
+               resourceFilter: resFilterOf($('mpResRow')), perVillage: perVillage,
+               skipped: STATE.data.skipped, budgetOverride: budget };
+    }
+    function runPlan() {
+      if (!STATE.data.oases.length) { alert('No oases yet — run "Scan oases" in the collector and Send.'); return; }
+      ensureRoles();
+      var N = Math.floor(Number($('mpBudget').value));
+      if (!isFinite(N) || N < 1) { alert('Enter a Movement budget of at least 1.'); return; }
+      STATE.data.config.movementBudget = N; persist();
+      var cfg = gatherPlanCfg(N);
+      if (!cfg.selectedSlots.length) { alert('Select at least one cavalry type.'); return; }
+      if (!cfg.includedDids.length) { alert('No village has Role = pve — set roles in the village table (Data & villages tab).'); return; }
+      var inst = PVE.buildInstance(STATE.data, cfg);
+      var result = PVE.solve(inst, { solver: getSolver(), maxExactPairs: 50, exactTimeoutMs: 10000 });
+      renderPlanResults(inst, result, N);
+      $('secPlanRes').classList.remove('hidden');
+      $('secPlanRes').scrollIntoView({ behavior: 'smooth' });
+    }
+    function renderPlanResults(inst, result, budget) {
+      // leftovers as a summary count only: farmed vs the candidate pool (free oases after skips + filter)
+      // 20,000 cap is account-wide: this hypothetical plan would REPLACE the oasis plan, so combine with PvP only
+      var combined = result.movements + (STATE.lastPvp ? STATE.lastPvp.result.movements : 0);
+      var over = combined > 20000;
+      var cards = [
+        { k: 'Oases farmed / candidates', v: result.count + ' / ' + inst.oases.length },
+        { k: 'Movement budget / village', v: budget.toLocaleString() },
+        { k: 'Outgoing movements', v: result.movements.toLocaleString(), warn: over }
+      ];
+      $('mpCards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('')
+        + (over ? '<div class="card warn"><div class="v">⚠ ' + combined.toLocaleString() + '</div><div class="k">planner + PvP combined — over the 20,000 movement cap</div></div>' : '');
+      // per-village requirement + train-delta: movements consumed = rainbows needed = the stock of
+      // EACH selected type; "to train" is the gap vs today's stock (stocks inform display, not the solve)
+      var slots = inst.selectedSlots;
+      var head = '<tr><th>Village</th><th class="num">Oases</th><th class="num" title="Movements consumed (≤ budget) = rainbows in flight = the stock of EACH selected type this village needs">Need of each</th>'
+        + slots.map(function (s) { return '<th class="num">' + esc(unitName(s)) + ' — train</th>'; }).join('') + '</tr>';
+      var totOases = 0, totMov = 0, totTrain = {};
+      slots.forEach(function (s) { totTrain[s] = 0; });
+      var body = inst.villages.map(function (iv, vi) {
+        var need = result.used[vi];
+        var nOases = result.perVillage[vi].length;
+        totOases += nOases; totMov += need;
+        var v = villageByDid(iv.did);
+        var cells = slots.map(function (s) {
+          var have = (v && v.troops && v.troops[s]) || 0;
+          var train = Math.max(0, need - have);
+          totTrain[s] += train;
+          return '<td class="num" title="need ' + need + ', have ' + have + '">' + (train > 0 ? train.toLocaleString() : '<span class="ok">✓</span>') + '</td>';
+        }).join('');
+        return '<tr><td>' + esc(iv.name) + '</td><td class="num">' + nOases + '</td><td class="num">' + need.toLocaleString() + '</td>' + cells + '</tr>';
+      }).join('');
+      var foot = '<tr><td><b>Account</b></td><td class="num"><b>' + totOases + '</b></td><td class="num"><b>' + totMov.toLocaleString() + '</b></td>'
+        + slots.map(function (s) { return '<td class="num"><b>' + (totTrain[s] > 0 ? totTrain[s].toLocaleString() : '—') + '</b></td>'; }).join('') + '</tr>';
+      $('mpTroops').innerHTML = head + body + foot;
+      drawPlanTable(inst, result);
+    }
+    function drawPlanTable(inst, result) {
+      // farm-list membership per tile — display only, same shape as the Oasis browser's column
+      var vNm = {}; STATE.data.villages.forEach(function (v) { vNm[v.did] = v.name; });
+      var listsByKey = {};
+      (STATE.data.farmLists || []).forEach(function (l) {
+        var tseen = {};
+        (l.targets || []).forEach(function (t) {
+          var k = t.x + '|' + t.y;
+          if (tseen[k]) return; tseen[k] = 1; // a list targeting a tile twice is one membership
+          (listsByKey[k] || (listsByKey[k] = [])).push({ name: l.name, village: l.villageName || vNm[l.villageDid] || '' });
+        });
+      });
+      var html = '';
+      inst.villages.forEach(function (iv, vi) {
+        var assigned = result.perVillage[vi];
+        if (!assigned.length) return; // villages with nothing assigned still show in the troop table above
+        var rows = assigned.slice().sort(function (a, b) { return (a.dist - b.dist) || (a.oi - b.oi); });
+        html += '<div class="vgroup"><div class="vgroup-h">' + esc(iv.name) + ' <span class="muted">(' + assigned.length + (assigned.length === 1 ? ' oasis' : ' oases') + ' · ' + result.used[vi].toLocaleString() + (result.used[vi] === 1 ? ' movement' : ' movements') + ')</span></div>'
+          + '<table><tr><th>Oasis</th><th class="num">Dist</th><th class="num" title="ceil(2 × travel / interval) — the rainbows / movements this oasis ties up">Cost</th><th>Type</th><th>In farm list</th></tr>'
+          + rows.map(function (p) {
+              var o = inst.oases[p.oi];
+              var lists = (listsByKey[o.x + '|' + o.y] || []).map(function (l) { return '<span title="' + esc(l.village) + '">' + esc(l.name) + '</span>'; }).join(', ');
+              return '<tr><td>' + mapLink(o.x, o.y) + '</td><td class="num">' + p.dist.toFixed(1) + '</td><td class="num">' + p.cost + '</td><td>' + typeLabel(o.bonuses) + '</td><td class="muted">' + (lists || '—') + '</td></tr>';
+            }).join('') + '</table></div>';
+      });
+      $('mpTable').innerHTML = html || '<p class="muted">Nothing farmable under this budget — raise the Movement budget or widen the filters.</p>';
+    }
+
     // ── tabs (active tab persisted) ──
-    var TAB_IDS = ['data', 'oasis', 'browse', 'pvp'];
+    var TAB_IDS = ['data', 'oasis', 'browse', 'pvp', 'plan'];
     function setTab(t) {
       if (TAB_IDS.indexOf(t) < 0) t = 'data';
       TAB_IDS.forEach(function (x) { $('tab-' + x).classList.toggle('on', x === t); });
@@ -1080,10 +1224,11 @@
     $('fileInput').addEventListener('change', function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.readAsText(f); });
     $('btnPaste').addEventListener('click', function () { ingestText($('pasteBox').value); });
     $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData).catch(function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
-    $('btnClear').addEventListener('click', function () { if (!confirm('Clear all imported data? You will need to re-scan and re-send pages.')) return; STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; STATE.lastPvp = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse', 'secPvp'].forEach(function (s) { $(s).classList.add('hidden'); }); ['hintOasis', 'hintBrowse', 'hintPvp'].forEach(function (s) { $(s).classList.remove('hidden'); }); $('cavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; ['pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable'].forEach(function (s) { $(s).innerHTML = ''; }); $('pvpStatus').innerHTML = ''; renderTribeSel(); setTab('data'); status('Cleared.'); });
+    $('btnClear').addEventListener('click', function () { if (!confirm('Clear all imported data? You will need to re-scan and re-send pages.')) return; STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; STATE.lastPvp = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse', 'secPvp', 'secPlan', 'secPlanRes'].forEach(function (s) { $(s).classList.add('hidden'); }); ['hintOasis', 'hintBrowse', 'hintPvp', 'hintPlan'].forEach(function (s) { $(s).classList.remove('hidden'); }); $('cavRow').innerHTML = ''; $('mpCavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; $('mpBudget').value = 1000; ['pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable', 'mpCards', 'mpTroops', 'mpTable'].forEach(function (s) { $(s).innerHTML = ''; }); $('pvpStatus').innerHTML = ''; renderTribeSel(); setTab('data'); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
     $('btnPvp').addEventListener('click', runPvp);
+    $('btnPlan').addEventListener('click', runPlan);
     $('brVil').addEventListener('change', renderBrowse);
     $('brMin').addEventListener('input', renderBrowse);
     $('brMax').addEventListener('input', renderBrowse);
@@ -1108,6 +1253,7 @@
     // ── boot ──
     restore();
     $('gIntSec').value = STATE.data.config.intervalSec;
+    $('mpBudget').value = STATE.data.config.movementBudget;
     setTab(STATE.data.config.activeTab);
     renderTribeSel(); renderRes();
     $('tribeSel').addEventListener('change', onTribeChange); // bound once

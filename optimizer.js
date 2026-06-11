@@ -56,7 +56,10 @@
   // data: { tribe, mapRadius, villages:[{did,name,x,y,troops:{tN:count}}],
   //         oases:[{x,y,bonuses:[{res,pct}]}], farmLists:[...] }
   // cfg:  { units, selectedSlots:[..], includedDids:Set/array, resourceFilter:{wood,..},
-  //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …] }
+  //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …], budgetOverride }
+  // budgetOverride (Movement planner — see CONTEXT.md "Movement budget"): a uniform hypothetical
+  // per-village budget that replaces the stock-fed Capacity for EVERY included village; real
+  // troop counts then play no part in the solve.
   // There is deliberately NO travel/reachability cap (see ADR-0002): budget feasibility alone
   // bounds the candidate set, and max-cardinality only takes a far oasis when it adds a farm.
   // units = UNITS[tribe] (slot->unit array). Returns an instance for the solver.
@@ -82,11 +85,14 @@
     var included = {};
     (cfg.includedDids || []).forEach(function (d) { included[d] = true; });
 
+    var override = (cfg.budgetOverride != null && isFinite(cfg.budgetOverride) && cfg.budgetOverride >= 0)
+      ? Math.floor(cfg.budgetOverride) : null;
     var villages = data.villages
       .filter(function (v) { return included[v.did]; })
       .map(function (v) {
         var counts = selected.map(function (s) { return (v.troops && v.troops[s]) || 0; });
-        var budget = counts.length ? Math.min.apply(null, counts) : 0;
+        var budget = override != null ? override
+          : (counts.length ? Math.min.apply(null, counts) : 0);
         var pv = (cfg.perVillage && cfg.perVillage[v.did]) || {};
         return {
           did: v.did, name: v.name, x: v.x, y: v.y,

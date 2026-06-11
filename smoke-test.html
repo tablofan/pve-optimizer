@@ -20,7 +20,7 @@ window.addEventListener('load', async () => {
     const $ = id => D.getElementById(id);
 
     log(!$('secBrowse').classList.contains('hidden'), 'browser section visible after data');
-    log(D.querySelectorAll('#tabBar .tab-btn').length === 4, 'tab bar has 4 tabs');
+    log(D.querySelectorAll('#tabBar .tab-btn').length === 5, 'tab bar has 5 tabs');
     log($('tab-data').classList.contains('on'), 'data tab active by default');
     const opts = $('brVil').options;
     log(opts.length === 5, 'village dropdown has all 5 villages', 'got ' + opts.length);
@@ -99,6 +99,35 @@ window.addEventListener('load', async () => {
     log(/All PvP farms fit/.test($('pvpStatus').textContent), 'no shortfall on the sample', $('pvpStatus').textContent);
     const usage = $('pvpUsage').textContent;
     log(/P007/.test(usage) && /P008/.test(usage), 'usage table lists both pvp villages');
+
+    // ── Movement planner tab: hypothetical uniform budget end-to-end ──
+    Array.prototype.find.call(D.querySelectorAll('#tabBar .tab-btn'), b => b.getAttribute('data-tab') === 'plan').click();
+    await tick(100);
+    log($('tab-plan').classList.contains('on'), 'plan tab activates');
+    log(!$('secPlan').classList.contains('hidden'), 'planner section visible after data');
+    const selOf = row => Array.prototype.filter.call($(row).querySelectorAll('label'), l => l.querySelector('input').checked).map(l => l.getAttribute('data-slot'));
+    const optSel = selOf('cavRow');
+    log(JSON.stringify(selOf('mpCavRow')) === JSON.stringify(optSel), 'planner cavalry seeded from the optimizer', JSON.stringify(selOf('mpCavRow')));
+    // own copy: toggling the planner's picker leaves the optimizer's untouched
+    const mpFirst = Array.prototype.find.call($('mpCavRow').querySelectorAll('label'), l => l.querySelector('input').checked);
+    mpFirst.querySelector('input').click();
+    await tick(50);
+    log(JSON.stringify(selOf('cavRow')) === JSON.stringify(optSel), 'planner picker is an own copy — optimizer selection untouched');
+    mpFirst.querySelector('input').click(); // restore
+    await tick(50);
+    $('mpBudget').value = '40';
+    $('mpBudget').dispatchEvent(new W.Event('input', { bubbles: true }));
+    $('btnPlan').click();
+    await tick(800);
+    log(!$('secPlanRes').classList.contains('hidden') && /candidates/i.test($('mpCards').textContent), 'planner cards render', $('mpCards').textContent.slice(0, 60));
+    const mpRows = Array.prototype.slice.call($('mpTroops').querySelectorAll('tr'), 1); // skip header
+    const mpBody = mpRows.slice(0, -1); // last row = Account totals
+    log(mpBody.length >= 1, 'troop table lists the Role-pve villages', mpBody.length + ' village rows');
+    const needs = mpBody.map(tr => parseInt(tr.cells[2].textContent.replace(/[.,]/g, ''), 10));
+    log(needs.every(n => n <= 40), 'every village stays within the 40-movement budget', JSON.stringify(needs));
+    log(/Account/.test(mpRows[mpRows.length - 1].textContent), 'account totals row present');
+    log($('mpTable').querySelectorAll('.vgroup').length >= 1, 'assignment listing grouped by village');
+    log(W.JSON.parse(W.localStorage.getItem('pveData')).config.movementBudget === 40, 'Movement budget persisted');
   } catch (e) {
     log(false, 'EXCEPTION', e && (e.message + ' @ ' + (e.stack || '').split('\n')[1]));
   }
