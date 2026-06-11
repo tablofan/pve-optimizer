@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Farm Optimizer — Collector
 // @namespace    https://github.com/tablofan/farm-optimizer
-// @version      0.7.1
+// @version      0.7.2
 // @description  Scan all free oases (map API) on a Travian T4.6 gameworld and send them (or download them as a file) — plus the current page's HTML — to the Farm Optimizer calculator, which does the parsing.
 // @match        *://*.travian.com/*
 // @run-at       document-idle
@@ -26,7 +26,10 @@
   var DEFAULT_CALC = 'https://tablofan.github.io/farm-optimizer/'; // the GitHub Pages calculator
   // `radius` is the world's half-size (−R..+R): both the scan extent AND the torus modulus sent as mapRadius.
   var CFG = Object.assign({ radius: 200, step: 30, calcUrl: '' }, saved);
-  if (!CFG.calcUrl) CFG.calcUrl = DEFAULT_CALC; // default; a saved (non-empty) URL wins
+  // default; a saved (non-empty) URL wins — EXCEPT dev leftovers (localhost / loopback / file:),
+  // which migrate to the published calculator: they were typed before DEFAULT_CALC existed and
+  // would otherwise win forever. A custom non-local URL is still respected.
+  if (!CFG.calcUrl || /^(file:|https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])([:/]|$))/i.test(CFG.calcUrl)) CFG.calcUrl = DEFAULT_CALC;
   function saveCfg() { try { localStorage.setItem('pveCollectorCfg', JSON.stringify(CFG)); } catch (e) { /* ignore */ } }
 
   var oases = []; try { oases = JSON.parse(localStorage.getItem('pveOasesCache') || '[]') || []; } catch (e) { oases = []; }
@@ -143,7 +146,7 @@
     p.innerHTML =
       '<div style="font-weight:600;color:#f5f0e8;margin-bottom:6px">Farm Optimizer — Collector</div>' +
       '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">Map ± <input id="pveRad" type="number" title="world half-size, e.g. 200 for a −200..200 map" style="width:54px" value="' + CFG.radius + '"> Step <input id="pveStep" type="number" style="width:44px" value="' + CFG.step + '"></div>' +
-      '<input id="pveCalc" placeholder="Calculator URL (required)" style="width:100%;margin-bottom:6px" value="' + (CFG.calcUrl || '') + '">' +
+      '<input id="pveCalc" placeholder="' + DEFAULT_CALC + '" title="Calculator URL — clear the field to reset to the default" style="width:100%;margin-bottom:6px" value="' + (CFG.calcUrl || '') + '">' +
       '<div style="display:flex;gap:4px;flex-wrap:wrap"><button id="pveScan">Scan oases</button><button id="pveSendO">Send oases</button><button id="pveDlO">Download oases</button><button id="pveSendP">Send this page</button></div>' +
       '<div id="pveLog" style="margin-top:8px;max-height:170px;overflow:auto;font-family:monospace;font-size:11px;color:#a8a29e"></div>';
     document.body.appendChild(p);
