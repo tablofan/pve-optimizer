@@ -38,8 +38,10 @@ Formulation (binary `x[o,v]` per feasible oasis-village pair):
 The user explicitly chose an exact optimum over a greedy heuristic. There is **no reachability cap**:
 every free oasis is a candidate for every selected village. Infeasible pairs (`cost > budget`) are
 pruned, which — because cost grows with distance — naturally bounds the candidate set without a
-user-facing range limit. The 20,000 outgoing-movement game limit is displayed (total = `Σ cost` of
-assigned oases), not optimized against.
+user-facing range limit. The 20,000 outgoing-movement game limit is displayed (total =
+`Σ ceil(travel/interval)` of assigned oases — outbound waves only; _was_ `Σ cost`, i.e. round
+trips, corrected 2026-06-12 because the game shows the return leg as incoming), not optimized
+against.
 
 ## Consequences
 

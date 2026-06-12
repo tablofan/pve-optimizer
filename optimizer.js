@@ -41,6 +41,14 @@
     return Math.ceil((2 * travelMin) / intervalMin);
   }
 
+  // Outgoing movements one farmed target shows on the game's counter = OUTBOUND waves in flight.
+  // The return leg displays in-game as an INCOMING movement, so it is not an outgoing movement —
+  // troops are still busy both legs, which is why stock budgets keep using oasisCost (round trip).
+  function outgoingMovements(travelMin, intervalMin) {
+    if (intervalMin <= 0) return Infinity;
+    return Math.ceil(travelMin / intervalMin);
+  }
+
   // ── Oasis typing ──────────────────────────────────────────────────
   var RES = ['wood', 'clay', 'iron', 'crop'];
   // Bucket an oasis to ONE resource by its primary (first non-crop) bonus.
@@ -113,8 +121,11 @@
       .map(function (o) { return { x: o.x, y: o.y, bonuses: o.bonuses, res: primaryRes(o.bonuses) }; })
       .filter(function (o) { return o.res && filter[o.res]; });
 
-    // Feasible (oasis,village) pairs with rainbow cost. Budget feasibility is the only pruning
-    // (cost grows with distance, so it naturally bounds the candidate set — see ADR-0002).
+    // Feasible (oasis,village) pairs with rainbow cost + outgoing-movement count. Budget
+    // feasibility is the only pruning (cost grows with distance, so it naturally bounds the
+    // candidate set — see ADR-0002). With a budgetOverride the budget is the planner's pooled
+    // OUTGOING-movement ceiling, so feasibility is judged on `out`; the stock-fed budget is
+    // rainbows, judged on `cost`.
     var pairs = [];
     var radius = data.mapRadius != null ? data.mapRadius : 200;
     oases.forEach(function (o, oi) {
@@ -123,8 +134,9 @@
         var dist = distance(o.x, o.y, v.x, v.y, radius);
         var tmin = travelMinutes(dist, baseSpeed, v.artefact, v.ts);
         var cost = oasisCost(tmin, v.interval);
-        if (!(cost <= v.budget && isFinite(cost))) return; // unaffordable
-        pairs.push({ oi: oi, vi: vi, cost: cost, dist: dist, travelMin: tmin });
+        var out = outgoingMovements(tmin, v.interval);
+        if (!(((override != null ? out : cost)) <= v.budget && isFinite(cost))) return; // unaffordable
+        pairs.push({ oi: oi, vi: vi, cost: cost, out: out, dist: dist, travelMin: tmin });
       });
     });
 
@@ -138,7 +150,7 @@
   }
 
   // ── Greedy solvers (always available; also the exact-path incumbent) ─
-  // Two O(P log P) constructions, best kept by (count, then movements):
+  // Two O(P log P) constructions, best kept by (count, then rainbows — troops tied up):
   //  - greedy: per-oasis cheapest-first (original). An oasis whose cheap village is full
   //    immediately takes its next-cheapest — possibly very expensive — pair, burning budget
   //    that many later cheap-only oases needed.
@@ -188,7 +200,7 @@
 
   function bestGreedy(inst) {
     var a = greedy(inst), b = greedyPairs(inst);
-    return (b.count > a.count || (b.count === a.count && b.movements < a.movements)) ? b : a;
+    return (b.count > a.count || (b.count === a.count && b.rainbows < a.rainbows)) ? b : a;
   }
 
   // ── Exact solver via an injected jsLPSolver-compatible solver ───────
@@ -227,6 +239,7 @@
 
   function finalize(inst, assign) {
     var used = inst.villages.map(function () { return 0; });
+    var outUsed = inst.villages.map(function () { return 0; });
     var perVillage = inst.villages.map(function () { return []; });
     var count = 0;
     var byKey = {}; // (oi|vi) -> pair, so finalize is O(P + assigned), not O(P × assigned)
@@ -236,16 +249,21 @@
       var pair = byKey[oi + '|' + vi];
       if (!pair) return;
       used[vi] += pair.cost;
-      perVillage[vi].push({ oi: oi, cost: pair.cost, dist: pair.dist, travelMin: pair.travelMin });
+      outUsed[vi] += pair.out;
+      perVillage[vi].push({ oi: oi, cost: pair.cost, out: pair.out, dist: pair.dist, travelMin: pair.travelMin });
       count++;
     });
-    var movements = used.reduce(function (s, u) { return s + u; }, 0);
-    return { assign: assign, count: count, used: used, perVillage: perVillage, movements: movements };
+    // rainbows = troops of each selected type tied up (round trip); movements = the game's
+    // OUTGOING counter (outbound waves only — the return leg shows in-game as incoming)
+    var rainbows = used.reduce(function (s, u) { return s + u; }, 0);
+    var movements = outUsed.reduce(function (s, u) { return s + u; }, 0);
+    return { assign: assign, count: count, used: used, outUsed: outUsed, perVillage: perVillage,
+             movements: movements, rainbows: rainbows };
   }
 
   // opts: { solver, maxExactPairs, exactTimeoutMs }
   // exactTimeoutMs (default 10s) timeboxes the ILP: a timed-out run yields the best solution
-  // found so far, used only if it beats greedy (more oases, or same oases for fewer movements)
+  // found so far, used only if it beats greedy (more oases, or same oases for fewer rainbows)
   // and labelled as not provably optimal.
   // maxExactPairs defaults to 50 — measured cliff for jsLPSolver's branch-and-bound on this
   // problem shape: 49 pairs = 36 ms, 62 pairs = 15 s, 78 pairs > 5 min. Beyond it the ILP
@@ -265,7 +283,7 @@
         var t0 = Date.now();
         var e = solveExact(inst, opts.solver, timeoutMs);
         var timedOut = timeoutMs > 0 && (Date.now() - t0) >= timeoutMs;
-        var better = e && (e.count > g.count || (e.count === g.count && e.movements <= g.movements));
+        var better = e && (e.count > g.count || (e.count === g.count && e.rainbows <= g.rainbows));
         if (better && !timedOut) {
           return Object.assign(e, { method: 'exact ILP (jsLPSolver)', optimal: true });
         }
@@ -283,27 +301,29 @@
   }
 
   // ── Movement planner solve (see CONTEXT.md "Movement budget") ──────
-  // ONE pooled budget over all villages — no per-village bound. Each oasis is served by whichever
-  // village farms it cheapest, and maximizing count under a single pool = take oases cheapest-first:
-  // with unit values and one knapsack the k cheapest costs are feasible iff any k are, so plain
-  // greedy is provably optimal (and movement-minimal for that count). No ILP involved.
-  // Expects an instance built with budgetOverride = the pool (pairs pruned only at cost > pool);
+  // ONE pooled budget of OUTGOING movements over all villages — no per-village bound. Each oasis
+  // is served by whichever village farms it cheapest, and maximizing count under a single pool =
+  // take oases cheapest-first: with unit values and one knapsack the k cheapest costs are feasible
+  // iff any k are, so plain greedy is provably optimal (and movement-minimal for that count).
+  // No ILP involved. The pool consumes `out` (the game's outgoing counter); the rainbow `cost`
+  // still rides along so the UI can report troops to train (round-trip waves) per village.
+  // Expects an instance built with budgetOverride = the pool (pairs pruned only at out > pool);
   // per-village v.budget is NOT consulted here.
   function solvePool(inst, budget) {
     var left = (budget != null && isFinite(budget) && budget > 0) ? Math.floor(budget) : 0;
-    var best = {}; // oi -> its cheapest pair (tie-break: distance, then village order — deterministic)
+    var best = {}; // oi -> its cheapest pair (tie-break: rainbows, distance, village order — deterministic)
     inst.pairs.forEach(function (p) {
       var b = best[p.oi];
-      if (!b || p.cost < b.cost || (p.cost === b.cost && (p.dist < b.dist || (p.dist === b.dist && p.vi < b.vi)))) best[p.oi] = p;
+      if (!b || p.out < b.out || (p.out === b.out && (p.cost < b.cost || (p.cost === b.cost && (p.dist < b.dist || (p.dist === b.dist && p.vi < b.vi)))))) best[p.oi] = p;
     });
     var order = Object.keys(best).map(function (k) { return best[k]; }).sort(function (a, b) {
-      return a.cost - b.cost || a.dist - b.dist || a.oi - b.oi;
+      return a.out - b.out || a.cost - b.cost || a.dist - b.dist || a.oi - b.oi;
     });
     var assign = {};
     for (var i = 0; i < order.length; i++) {
       var p = order[i];
-      if (p.cost > left) break; // sorted ascending — nothing later fits either
-      assign[p.oi] = p.vi; left -= p.cost;
+      if (p.out > left) break; // sorted ascending — nothing later fits either
+      assign[p.oi] = p.vi; left -= p.out;
     }
     return Object.assign(finalize(inst, assign),
       { method: 'cheapest-first (pooled budget — provably optimal)', optimal: true });
@@ -551,12 +571,14 @@
     var maxPasses = opts.maxPasses != null ? opts.maxPasses : 25;
     var V = inst.villages.length;
 
-    // travel + waves per farm × village (waves = round-trips in flight, same physics as oases)
+    // travel + waves per farm × village (waves = round-trips in flight — the stock tied up;
+    // out = outbound waves only — the game's outgoing-movement counter; same physics as oases)
     var cache = inst.farms.map(function (f) {
       return inst.villages.map(function (v) {
         var d = distance(f.x, f.y, v.x, v.y, inst.radius);
         var tmin = travelMinutes(d, f.speed, v.artefact, v.ts);
-        return { dist: d, travelMin: tmin, waves: oasisCost(tmin, v.interval) };
+        return { dist: d, travelMin: tmin, waves: oasisCost(tmin, v.interval),
+                 out: outgoingMovements(tmin, v.interval) };
       });
     });
     function demand(fi, vi) { // per-slot troops tied up by farm fi if held by village vi
@@ -665,8 +687,8 @@
       });
       return { did: v.did, name: v.name, perSlot: perSlot };
     });
-    var movements = 0;
-    inst.farms.forEach(function (f, fi) { movements += cache[fi][assign[fi]].waves; });
+    var movements = 0; // outgoing only — the return leg shows in-game as incoming
+    inst.farms.forEach(function (f, fi) { movements += cache[fi][assign[fi]].out; });
     return { assign: assign, rows: rows, usage: usageOut, shortfalls: shortfalls,
              movements: movements, moves: rows.filter(function (r) { return r.status === 'move'; }).length };
   }
@@ -674,7 +696,8 @@
   // ── exports ────────────────────────────────────────────────────────
   var PVE = {
     axisSize: axisSize, torusDelta: torusDelta, distance: distance,
-    travelMinutes: travelMinutes, oasisCost: oasisCost, primaryRes: primaryRes, RES: RES,
+    travelMinutes: travelMinutes, oasisCost: oasisCost, outgoingMovements: outgoingMovements,
+    primaryRes: primaryRes, RES: RES,
     buildInstance: buildInstance, greedy: greedy, greedyPairs: greedyPairs, bestGreedy: bestGreedy,
     solveExact: solveExact, solve: solve, solvePool: solvePool,
     planDiff: planDiff, browseOases: browseOases,

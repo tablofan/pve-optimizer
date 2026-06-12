@@ -169,19 +169,24 @@ optimizer's assignment would tie up.
 _Avoid_: before (ambiguous), committed (sounds like an in-game state).
 
 **Outgoing movement**:
-One in-flight farm-send occupying a troop-movement slot. At steady state a farmed **Oasis** holds
-`ceil(2 × travel/interval)` of them, so the account total = the sum of all assigned rainbow costs.
-The gameworld caps total troop movements at **20,000**; the **Calculator** displays this estimate
-but does not optimize against it. (The **Movement planner** does constrain movements — but against a
-pooled **Movement budget** the player chooses, not against this game cap.)
+One *outbound* in-flight farm-send — what the game's rally-point "Outgoing troops" counter shows.
+At steady state a farmed **Oasis** holds `ceil(travel/interval)` of them; the returning waves
+display in-game as *incoming* movements and are never counted here (the troops they carry are
+still busy, which is why **Capacity** and all troop budgets use the round-trip **Rainbow** cost
+`ceil(2 × travel/interval)` instead). The gameworld caps total troop movements at **20,000**; the
+**Calculator** displays this estimate but does not optimize against it. (The **Movement planner**
+does constrain movements — but against a pooled **Movement budget** the player chooses, not against
+this game cap.) _Was_: counted round trips (= the rainbow cost), double-counting vs the game's
+outgoing counter — corrected 2026-06-12.
 
 **Movement planner**:
 The **Calculator** tab that answers "what would it take?": it re-runs the oasis assignment for every
 Role-PvE **Village** with one pooled **Movement budget** in place of every **Capacity** constraint
 (real cavalry stocks play no part in the solve), maximizing the total count of **Oases** farmed
 account-wide — each oasis by at most one village, served by whichever village farms it cheapest —
-and reports each village's consumed movements as the cavalry stock to train (1 of each selected type
-per movement, shown with the gap against today's stock). Purely hypothetical and display-only: there
+and reports each village's pool draw (**Outgoing movements**) alongside the cavalry stock to train
+(1 of each selected type per round-trip **Rainbow** — roughly double the movements drawn, shown with
+the gap against today's stock). Purely hypothetical and display-only: there
 is no **Plan diff** — **Current farm lists** are shown per-oasis as information, never reconciled.
 It honors **Skipped oases** and carries its own resource filter and its own cavalry selection
 (seeded from the oasis optimizer's).
@@ -208,7 +213,7 @@ game's 20,000 cap), per-village budget (the pool replaced it), budget (alone —
 - Each oasis assignment ties up **Cavalry** as **Rainbows**; each **PvP farm** ties up its **Send** × waves in flight.
 - **Travel time** is a function of **Distance**, unit speed (slowest in the send), **Tournament Square**, and **Speed artefact**.
 - A **Village** has a **Capacity** — the rainbows it can sustain across its assigned oases at a given **Sending interval**.
-- The **Movement planner** re-runs the oasis assignment with one pooled **Movement budget** in place of every Role-PvE **Village**'s **Capacity**, and reads the troops to train off each village's consumed movements.
+- The **Movement planner** re-runs the oasis assignment with one pooled **Movement budget** in place of every Role-PvE **Village**'s **Capacity**, and reads the troops to train off each village's round-trip **Rainbow** need.
 
 ## Example dialogue
 

@@ -304,8 +304,8 @@
        fresh index.html paired with a stale cached script fails silently (seen live: a cached
        pre-solvePool optimizer.js made the Movement planner's Calculate a no-op). Bump BOTH when
        either file changes; the boot guard below catches a mismatch that slips through anyway. -->
-  <script src="cavalry.js?v=2"></script>
-  <script src="optimizer.js?v=2"></script>
+  <script src="cavalry.js?v=3"></script>
+  <script src="optimizer.js?v=3"></script>
   <!-- exact ILP solver (pure JS, no build). Falls back to greedy if unavailable. -->
   <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js"
           onerror="window.__solverFailed=true"></script>
@@ -1162,17 +1162,20 @@
       ];
       $('mpCards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('')
         + (over ? '<div class="card warn"><div class="v">⚠ ' + combined.toLocaleString() + '</div><div class="k">planner + PvP combined — over the 20,000 movement cap</div></div>' : '');
-      // per-village requirement + train-delta: movements consumed = rainbows needed = the stock of
-      // EACH selected type; "to train" is the gap vs today's stock (stocks inform display, not the solve)
+      // per-village pool draw + train-delta: the pool consumes OUTGOING movements (the game's
+      // counter — outbound waves only); the stock of EACH selected type needed = rainbows in
+      // flight (round trip, roughly double); "to train" is the gap vs today's stock (stocks
+      // inform display, not the solve)
       var slots = inst.selectedSlots;
-      var head = '<tr><th>Village</th><th class="num">Oases</th><th class="num" title="Movements drawn from the shared pool = rainbows in flight = the stock of EACH selected type this village needs">Need of each</th>'
+      var head = '<tr><th>Village</th><th class="num">Oases</th><th class="num" title="Outgoing movements drawn from the shared pool — outbound waves only, the game\'s outgoing counter">Moves</th><th class="num" title="Rainbows in flight (round trip — outbound + return legs) = the stock of EACH selected type this village needs">Need of each</th>'
         + slots.map(function (s) { return '<th class="num">' + esc(unitName(s)) + ' — train</th>'; }).join('') + '</tr>';
-      var totOases = 0, totMov = 0, totTrain = {};
+      var totOases = 0, totMov = 0, totNeed = 0, totTrain = {};
       slots.forEach(function (s) { totTrain[s] = 0; });
       var body = inst.villages.map(function (iv, vi) {
         var need = result.used[vi];
+        var mov = result.outUsed[vi];
         var nOases = result.perVillage[vi].length;
-        totOases += nOases; totMov += need;
+        totOases += nOases; totMov += mov; totNeed += need;
         var v = villageByDid(iv.did);
         var cells = slots.map(function (s) {
           var have = (v && v.troops && v.troops[s]) || 0;
@@ -1180,9 +1183,9 @@
           totTrain[s] += train;
           return '<td class="num" title="need ' + need + ', have ' + have + '">' + (train > 0 ? train.toLocaleString() : '<span class="ok">✓</span>') + '</td>';
         }).join('');
-        return '<tr><td>' + esc(iv.name) + '</td><td class="num">' + nOases + '</td><td class="num">' + need.toLocaleString() + '</td>' + cells + '</tr>';
+        return '<tr><td>' + esc(iv.name) + '</td><td class="num">' + nOases + '</td><td class="num">' + mov.toLocaleString() + '</td><td class="num">' + need.toLocaleString() + '</td>' + cells + '</tr>';
       }).join('');
-      var foot = '<tr><td><b>Account</b></td><td class="num"><b>' + totOases + '</b></td><td class="num"><b>' + totMov.toLocaleString() + '</b></td>'
+      var foot = '<tr><td><b>Account</b></td><td class="num"><b>' + totOases + '</b></td><td class="num"><b>' + totMov.toLocaleString() + '</b></td><td class="num"><b>' + totNeed.toLocaleString() + '</b></td>'
         + slots.map(function (s) { return '<td class="num"><b>' + (totTrain[s] > 0 ? totTrain[s].toLocaleString() : '—') + '</b></td>'; }).join('') + '</tr>';
       $('mpTroops').innerHTML = head + body + foot;
       drawPlanTable(inst, result);
@@ -1205,12 +1208,12 @@
         var assigned = result.perVillage[vi];
         if (!assigned.length) return; // villages with nothing assigned still show in the troop table above
         var rows = assigned.slice().sort(function (a, b) { return (a.dist - b.dist) || (a.oi - b.oi); });
-        html += vgroupTag(wasOpen, iv.did, esc(iv.name) + ' <span class="muted">(' + assigned.length + (assigned.length === 1 ? ' oasis' : ' oases') + ' · ' + result.used[vi].toLocaleString() + (result.used[vi] === 1 ? ' movement' : ' movements') + ')</span>')
-          + '<table><tr><th>Oasis</th><th class="num">Dist</th><th class="num" title="ceil(2 × travel / interval) — the rainbows / movements this oasis ties up">Cost</th><th>Type</th><th>In farm list</th></tr>'
+        html += vgroupTag(wasOpen, iv.did, esc(iv.name) + ' <span class="muted">(' + assigned.length + (assigned.length === 1 ? ' oasis' : ' oases') + ' · ' + result.outUsed[vi].toLocaleString() + (result.outUsed[vi] === 1 ? ' movement' : ' movements') + ')</span>')
+          + '<table><tr><th>Oasis</th><th class="num">Dist</th><th class="num" title="ceil(travel / interval) — outgoing movements this oasis draws from the pool (outbound waves only)">Moves</th><th class="num" title="ceil(2 × travel / interval) — rainbows in flight = troops of EACH selected type this oasis ties up">Each</th><th>Type</th><th>In farm list</th></tr>'
           + rows.map(function (p) {
               var o = inst.oases[p.oi];
               var lists = (listsByKey[o.x + '|' + o.y] || []).map(function (l) { return '<span title="' + esc(l.village) + '">' + esc(l.name) + '</span>'; }).join(', ');
-              return '<tr><td>' + mapLink(o.x, o.y) + '</td><td class="num">' + p.dist.toFixed(1) + '</td><td class="num">' + p.cost + '</td><td>' + typeLabel(o.bonuses) + '</td><td class="muted">' + (lists || '—') + '</td></tr>';
+              return '<tr><td>' + mapLink(o.x, o.y) + '</td><td class="num">' + p.dist.toFixed(1) + '</td><td class="num">' + p.out + '</td><td class="num">' + p.cost + '</td><td>' + typeLabel(o.bonuses) + '</td><td class="muted">' + (lists || '—') + '</td></tr>';
             }).join('') + '</table></details>';
       });
       $('mpTable').innerHTML = html || '<p class="muted">Nothing farmable under this budget — raise the Movement budget or widen the filters.</p>';
@@ -1283,7 +1286,7 @@
     // slips through anyway (or a future bump is forgotten), the symptom is buttons silently
     // doing nothing — say so loudly instead.
     var missingApi = ['buildInstance', 'solve', 'solvePool', 'planDiff', 'browseOases',
-                      'buildPvpInstance', 'pvpRebalance', 'farmKinds', 'deriveRole']
+                      'buildPvpInstance', 'pvpRebalance', 'farmKinds', 'deriveRole', 'outgoingMovements']
       .filter(function (fn) { return typeof (window.PVE && PVE[fn]) !== 'function'; });
     if (missingApi.length || typeof UNITS !== 'object') { // bare typeof: `const UNITS` is a global lexical binding, never a window property
       document.querySelector('.container').insertBefore(

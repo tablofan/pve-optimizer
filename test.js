@@ -89,6 +89,22 @@ t('greedy places every reachable oasis when budget is ample (=> provably optimal
   // capacity respected
   inst.villages.forEach((v, vi) => assert(r.used[vi] <= v.budget, 'within budget'));
 });
+t('movements = OUTBOUND waves only; rainbows = round trip (returns show in-game as incoming)', () => {
+  // t6 (14 base = 28 f/h on the speed server): 28 fields = 60 min one-way. Interval 25 min:
+  // troops tied up = ceil(120/25) = 5 rainbows, but the game's outgoing counter only shows the
+  // outbound waves = ceil(60/25) = 3 (the return leg displays as an incoming movement).
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 10 } }],
+    oases: [{ x: 28, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }], farmLists: [] };
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 25, artefact: 1 } } });
+  const r = PVE.solve(inst, {});
+  assert.strictEqual(r.count, 1);
+  assert.strictEqual(r.rainbows, 5, 'stock of each selected type tied up = round-trip waves');
+  assert.strictEqual(r.used[0], 5, 'per-village budget consumption stays round-trip');
+  assert.strictEqual(r.movements, 3, 'outgoing movements = outbound waves only');
+  assert.strictEqual(r.outUsed[0], 3, 'per-village outgoing movements reported');
+});
 t('tight budget forces choices; greedy maximizes count & respects capacity', () => {
   // 2 villages, budget 3 each; 4 oases. v0 cheap to all (cost1), v1 cost2.
   const data = { mapRadius: 200,
@@ -268,11 +284,11 @@ t('solve() labels a completed, accepted ILP run "exact ILP" and optimal', () => 
     villages: [{ did: 1, name: 'V1', budget: 1 }, { did: 2, name: 'V2', budget: 4 }],
     oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }, { x: 4, y: 0 }],
     pairs: [
-      { oi: 0, vi: 0, cost: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 3, dist: 3, travelMin: 3 },
-      { oi: 1, vi: 0, cost: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 3, dist: 3, travelMin: 3 },
-      { oi: 2, vi: 1, cost: 1, dist: 1, travelMin: 1 },
-      { oi: 3, vi: 1, cost: 1, dist: 1, travelMin: 1 },
-      { oi: 4, vi: 1, cost: 1, dist: 1, travelMin: 1 }
+      { oi: 0, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 1, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 2, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 },
+      { oi: 3, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 },
+      { oi: 4, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 }
     ],
     maxPossible: 5
   };
@@ -305,7 +321,7 @@ t('solve() labels a timed-out ILP as not provably optimal', () => {
   } };
   const r = PVE.solve(inst, { solver: slowSolver, exactTimeoutMs: 30 });
   assert.strictEqual(r.optimal, false, 'timed-out result not flagged optimal');
-  // the incumbent ties greedy (count 1, movements 1), so it must surface as TIMEBOXED specifically
+  // the incumbent ties greedy (count 1, rainbows 1), so it must surface as TIMEBOXED specifically
   assert(/timeboxed/.test(r.method), 'method pins the timeboxed branch, got: ' + r.method);
 });
 
@@ -337,11 +353,11 @@ t('greedyPairs avoids the budget-burn cascade; solve() takes the better construc
     villages: [{ did: 1, name: 'V1', budget: 1 }, { did: 2, name: 'V2', budget: 4 }],
     oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }, { x: 4, y: 0 }],
     pairs: [
-      { oi: 0, vi: 0, cost: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 3, dist: 3, travelMin: 3 },
-      { oi: 1, vi: 0, cost: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 3, dist: 3, travelMin: 3 },
-      { oi: 2, vi: 1, cost: 1, dist: 1, travelMin: 1 },
-      { oi: 3, vi: 1, cost: 1, dist: 1, travelMin: 1 },
-      { oi: 4, vi: 1, cost: 1, dist: 1, travelMin: 1 }
+      { oi: 0, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 1, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 2, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 },
+      { oi: 3, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 },
+      { oi: 4, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 }
     ],
     maxPossible: 5
   };
@@ -352,25 +368,25 @@ t('greedyPairs avoids the budget-burn cascade; solve() takes the better construc
   const r = PVE.solve(inst, {});
   assert.strictEqual(r.count, 4, 'solve() returns the better of the two constructions');
 });
-t('bestGreedy tie-break: equal count, strictly fewer movements wins', () => {
-  // greedy: A1->V1, A2 falls back to V2 at cost 3 (V2 left with 0), B stranded -> count 2, movements 4.
-  // pairs:  A1->V1, B->V2 at cost 1, A2's cost-3 pair no longer fits      -> count 2, movements 2.
+t('bestGreedy tie-break: equal count, strictly fewer rainbows wins', () => {
+  // greedy: A1->V1, A2 falls back to V2 at cost 3 (V2 left with 0), B stranded -> count 2, rainbows 4.
+  // pairs:  A1->V1, B->V2 at cost 1, A2's cost-3 pair no longer fits      -> count 2, rainbows 2.
   const inst = {
     villages: [{ did: 1, name: 'V1', budget: 1 }, { did: 2, name: 'V2', budget: 3 }],
     oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
     pairs: [
-      { oi: 0, vi: 0, cost: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 3, dist: 3, travelMin: 3 },
-      { oi: 1, vi: 0, cost: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 3, dist: 3, travelMin: 3 },
-      { oi: 2, vi: 1, cost: 1, dist: 1, travelMin: 1 }
+      { oi: 0, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 1, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 2, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 }
     ],
     maxPossible: 3
   };
   const a = PVE.greedy(inst), b = PVE.greedyPairs(inst), best = PVE.bestGreedy(inst);
-  assert.strictEqual(a.count, 2); assert.strictEqual(a.movements, 4);
-  assert.strictEqual(b.count, 2); assert.strictEqual(b.movements, 2);
-  assert.strictEqual(best.movements, 2, 'tie on count broken to the cheaper packing');
+  assert.strictEqual(a.count, 2); assert.strictEqual(a.rainbows, 4);
+  assert.strictEqual(b.count, 2); assert.strictEqual(b.rainbows, 2);
+  assert.strictEqual(best.rainbows, 2, 'tie on count broken to the cheaper packing');
 });
-t('bestGreedy never returns the worse construction (and ties break to fewer movements)', () => {
+t('bestGreedy never returns the worse construction (and ties break to fewer rainbows)', () => {
   const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'sample-data.json')));
   const inst = PVE.buildInstance(data, {
     units: UNITS.huns, selectedSlots: ['t4','t5','t6'],
@@ -383,7 +399,7 @@ t('bestGreedy never returns the worse construction (and ties break to fewer move
   const a = PVE.greedy(inst), b = PVE.greedyPairs(inst), best = PVE.bestGreedy(inst);
   assert(best.count >= a.count && best.count >= b.count, 'best-of-both count');
   if (best.count === a.count && best.count === b.count) {
-    assert(best.movements <= Math.min(a.movements, b.movements), 'tie broken to fewer movements');
+    assert(best.rainbows <= Math.min(a.rainbows, b.rainbows), 'tie broken to fewer rainbows');
   }
 });
 
@@ -569,7 +585,7 @@ t('demand scales with waves in flight: farther holder ties up comp × ceil(2·tr
   const r = PVE.pvpRebalance(inst, {});
   assert.strictEqual(r.rows[0].waves, 4, 'ceil(120/30)');
   assert.strictEqual(r.usage[0].perSlot.t6.used, 20, '5 Marauders × 4 waves');
-  assert.strictEqual(r.movements, 4, 'movements = Σ waves');
+  assert.strictEqual(r.movements, 2, 'movements = Σ OUTBOUND waves only (ceil(60/30)) — returns show as incoming');
 });
 
 console.log('pvp rebalancer — keep-biased improvement');
@@ -726,10 +742,10 @@ t('solvePool: the pool is a ceiling on the SUM; count matches the cheapest-first
   assert(r.movements <= 100, 'never exceeds the pool (got ' + r.movements + ')');
   assert(r.count > 0 && r.count < 30, 'pool actually cut the tail');
   assert.strictEqual(r.optimal, true, 'pooled greedy is provably optimal');
-  // max count under one pool = take the cheapest per-oasis costs first — verify against it
-  const costs = inst.pairs.map(p => p.cost).sort((a, b) => a - b);
+  // max count under one pool = take the cheapest per-oasis OUTGOING costs first — verify against it
+  const outs = inst.pairs.map(p => p.out).sort((a, b) => a - b);
   let sum = 0, best = 0;
-  for (const c of costs) { if (sum + c > 100) break; sum += c; best++; }
+  for (const c of outs) { if (sum + c > 100) break; sum += c; best++; }
   assert.strictEqual(r.count, best, 'matches cheapest-first optimum');
 });
 t('solvePool keeps skips + resource filter; each oasis is served by its cheapest village', () => {
@@ -750,8 +766,8 @@ t('solvePool keeps skips + resource filter; each oasis is served by its cheapest
   assert.strictEqual(r.perVillage[1].length, 0, 'and by no one else');
 });
 t('the pool binds ACROSS villages: skew accepted, sum capped — per-village budgets would differ', () => {
-  // A's cluster costs 1+2+3+4 = 10; B's cluster costs 9,10,11,12. Pool N=12: cheapest-first takes
-  // all of A's, then B's cheapest (9) no longer fits (10+9 > 12) — so A draws 10/12, B nothing.
+  // A's cluster draws 1+1+2+2 = 6 outgoing movements; B's draws 5,5,6,6. Pool N=10: cheapest-first
+  // takes all of A's, then B's cheapest (5) no longer fits (6+5 > 10) — so A draws 6/10, B nothing.
   const data = { mapRadius: 200,
     villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }, { did: 2, name: 'B', x: 100, y: 0, troops: {} }],
     oases: [1, 2, 3, 4].map(x => ({ x, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }))            // near A
@@ -759,13 +775,15 @@ t('the pool binds ACROSS villages: skew accepted, sum capped — per-village bud
     farmLists: [] };
   const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1, 2],
     resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 }, 2: { ts: 0, interval: 5, artefact: 1 } },
-    budgetOverride: 12 });
-  const r = PVE.solvePool(inst, 12);
-  assert(r.movements <= 12, 'pooled sum capped (got ' + r.movements + ')');
+    budgetOverride: 10 });
+  const r = PVE.solvePool(inst, 10);
+  assert(r.movements <= 10, 'pooled sum capped (got ' + r.movements + ')');
   assert.strictEqual(r.count, 4, 'pool binds: only the cheap cluster fits');
-  assert.strictEqual(r.used[0], 10, 'A draws most of the pool — no per-village bound');
-  assert.strictEqual(r.used[1], 0, 'B draws nothing');
-  // discriminator: the OLD per-village semantics (budget 12 EACH) would farm a 5th oasis from B
+  assert.strictEqual(r.outUsed[0], 6, 'A draws most of the pool — no per-village bound');
+  assert.strictEqual(r.outUsed[1], 0, 'B draws nothing');
+  assert.strictEqual(r.used[0], 10, 'rainbow need (round trip) still reported per village');
+  // discriminator: the OLD per-village semantics (rainbow budget 10 EACH) would farm a 5th oasis
+  // from B (its cheapest costs 9 rainbows)
   const old = PVE.solve(inst, {});
   assert.strictEqual(old.count, 5, 'sanity: per-village budgets would farm more — the pool is what binds');
 });
@@ -796,7 +814,8 @@ t('pooled budget on the sample data: the SUM stays ≤ N (individual villages un
     perVillage, budgetOverride: N });
   const r = PVE.solvePool(inst, N);
   assert(r.movements <= N, 'pooled consumption within the budget (got ' + r.movements + ')');
-  assert.strictEqual(r.used.reduce((s, u) => s + u, 0), r.movements, 'per-village used sums to movements');
+  assert.strictEqual(r.outUsed.reduce((s, u) => s + u, 0), r.movements, 'per-village outgoing sums to movements');
+  assert.strictEqual(r.used.reduce((s, u) => s + u, 0), r.rainbows, 'per-village rainbows sum to the total');
   assert(r.count > 0, 'something is farmed at N=25');
 });
 

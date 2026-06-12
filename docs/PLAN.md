@@ -20,8 +20,9 @@ a **Collector** userscript and a static **Calculator** page.
 > planner** (see `CONTEXT.md`): the oasis assignment re-run against one **pooled** hypothetical
 > **Movement budget** shared by all Role-pve villages (`buildInstance`'s `budgetOverride` prunes
 > pairs that could never fit; `solvePool` enforces the pooled ceiling — cheapest-village,
-> cheapest-first, provably optimal, no ILP), reporting per village the movements consumed = the
-> stock of each selected cavalry type to train. Display only, no plan diff; it carries its own
+> cheapest-first, provably optimal, no ILP), reporting per village the outgoing movements drawn
+> from the pool plus the stock of each selected cavalry type to train (= round-trip rainbows,
+> roughly double the movements drawn). Display only, no plan diff; it carries its own
 > cavalry picker (seeded from the optimizer's) and resource filter. (_Was_, same day: a uniform
 > per-village budget — changed to one shared pool.)
 
@@ -121,7 +122,7 @@ rather than the full replace that a complete dataset triggers.
 - `Σ_v x[o,v] ≤ 1` (oasis ≤ 1 village); `Σ_o cost[o,v]·x[o,v] ≤ budget[v]`.
 - **Best-of-two greedy** is the workhorse (`bestGreedy`): (a) per-oasis cheapest-first (`greedy`) and
   (b) global cheapest-pair packing (`greedyPairs` — all pairs sorted by (cost, dist), assign while
-  the oasis is free and budget remains), keeping the better by (count, then movements). (b) fixes
+  the oasis is free and budget remains), keeping the better by (count, then rainbows). (b) fixes
   (a)'s budget-burn cascade: an oasis whose cheap village is full immediately takes an expensive
   fallback pair, stranding later cheap-only oases. Neither strictly dominates (rare ±1 cases both
   ways — fuzz-verified), hence best-of-both. Benchmarked vs LP bounds on the real 16,648-oasis world
@@ -137,7 +138,9 @@ rather than the full replace that a complete dataset triggers.
   optimal. `solveExact` **feasibility-checks** the decoded assignment (budgets) — a timeout with no
   integral incumbent leaks the fractional LP relaxation, which rounds to budget violations (seen:
   622/613).
-- **Outgoing-movement estimate** = `Σ cost` over assigned oases; flag against the 20,000 cap.
+- **Outgoing-movement estimate** = `Σ ceil(travel/interval)` over assigned oases — outbound waves
+  only, matching the game's outgoing counter (the return leg shows in-game as incoming); flag
+  against the 20,000 cap. Budgets stay on the round-trip rainbow `cost`.
 
 ## Plan diff (display only)
 
@@ -170,7 +173,8 @@ rather than the full replace that a complete dataset triggers.
   no knob); the phases **alternate to a joint fixpoint** (a B move can free the receiver capacity a
   stuck A repair needed). **Soft keep, hard move**: staying over budget is allowed and reported as per-type
   shortfalls; a move never creates or worsens one. Output: keep/move rows (grouped by current
-  holder in the UI), per-village × per-type used/stock, shortfalls, Σ-waves movement estimate.
+  holder in the UI), per-village × per-type used/stock, shortfalls, Σ outbound-waves movement
+  estimate (stock demand stays on round-trip waves).
 
 ## Build order
 

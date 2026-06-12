@@ -54,8 +54,9 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
      capacities replaced by one **pooled** hypothetical **Movement budget** (outgoing movements
      summed account-wide — a ceiling, never exceeded; no per-village bound; troop stocks play no
      part in the solve). Each oasis goes to whichever village farms it cheapest, so cheapest-first
-     greedy is provably optimal — no ILP involved. Reports per village the movements consumed =
-     the stock of **each** selected cavalry type needed, with a **to-train** gap vs today's stock,
+     greedy is provably optimal — no ILP involved. Reports per village the outgoing movements
+     drawn from the pool *and* the stock of **each** selected cavalry type needed (= round-trip
+     rainbows, roughly double the movements), with a **to-train** gap vs today's stock,
      plus the assignment grouped by village (farm-list membership shown per oasis as info — no
      plan diff) and leftovers as a summary count. It carries its **own** cavalry picker (seeded
      from the optimizer's selection) and resource filter, so hypotheticals never reconfigure the
@@ -98,7 +99,9 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
   branch-and-bound cliffs at ~60 pairs: 62 pairs = 15 s, 78 pairs > 5 min), **timeboxed (10 s)**,
   its result *feasibility-checked* (a timeout can leak the fractional LP relaxation, which rounds
   to budget violations) and kept only if it beats greedy. The plan shows the **outgoing-movement**
-  estimate (= Σ rainbow cost) against the 20,000 game cap.
+  estimate (= Σ `ceil(travel / interval)` — outbound waves only, matching the game's outgoing
+  counter; the return leg shows in-game as *incoming* and is not counted) against the 20,000 game
+  cap. Troop budgets stay on the round-trip rainbow cost — troops are busy both legs.
 - **PvP rebalancer** (ADR-0004) — the farm set is fixed (every farm-list entry whose target isn't a
   free oasis, with its parsed send comp); only *who holds each entry* changes. All unit types count
   (infantry included; the hero is ignored): a farm ties up `comp × ceil(2 × travel / interval)` of
